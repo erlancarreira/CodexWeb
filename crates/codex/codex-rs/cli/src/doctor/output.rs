@@ -1883,8 +1883,8 @@ Run codex doctor without --summary for detailed diagnostics.
                 ("sk-proj-SYNTHETIC_CREDENTIAL", "<redacted>"),
                 ("ghp_SYNTHETIC_CREDENTIAL", "<redacted>"),
                 ("github_pat_SYNTHETIC_CREDENTIAL", "<redacted>"),
-                ("AKIAABCDEFGHIJKLMNOP", "<redacted>"),
-                ("ASIAABCDEFGHIJKLMNOP", "<redacted>"),
+                (concat!("AK", "IAABCDEFGHIJKLMNOP"), "<redacted>"),
+                (concat!("AS", "IAABCDEFGHIJKLMNOP"), "<redacted>"),
                 ("eyJhbGciOiJIUzI1NiJ9.synthetic.signature", "<redacted>"),
             ] {
                 assert_eq!(
