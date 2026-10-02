@@ -37,6 +37,7 @@ const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
 const { runtimeBundlePaths } = require("./runtime-command.cjs");
 const { createUpdateController } = require("./update.cjs");
+const { startWindowsDesktopBootstrap } = require("./windows-desktop-bootstrap.cjs");
 const {
   createStateStore,
   nextSessionRefreshReminderAt,
@@ -1128,6 +1129,7 @@ async function start() {
     filePath: path.join(app.getPath("logs"), "launcher.jsonl"),
     publish: (record) => send("launcher:log", record),
   });
+  startWindowsDesktopBootstrap({ app, logger });
   const startHidden = process.argv.includes("--hidden") && stateStore.read().onboardingComplete;
   nativeTheme.themeSource = "system";
   mainWindow = createWindow({
