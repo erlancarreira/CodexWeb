@@ -1,0 +1,68 @@
+name: Windows CodexNative Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/windows-picker-build
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_DEBUG: "none"
+      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify SQL migration line endings
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem state -Recurse -Filter *.sql
+          $bad = @()
+          foreach ($file in $files) {
+            $bytes = [IO.File]::ReadAllBytes($file.FullName)
+            if ($bytes -contains 13) { $bad += $file.FullName }
+          }
+          if ($bad.Count -gt 0) {
+            $bad | ForEach-Object { Write-Error "CRLF migration detected: $_" }
+            exit 1
+          }
+          $hash = (Get-FileHash state/migrations/0001_threads.sql -Algorithm SHA384).Hash
+          Write-Host "0001_threads.sql SHA384=$hash"
+          if ($hash -ne "627EF19164C9BB298A0CD99945981C9B7BDA3D9E6CF12EB35145E3B1D3BF7CF8740F0DBAA0B475185FC2993397078049") {
+            throw "Unexpected migration checksum; refusing to build an incompatible Windows binary"
+          }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: codex-rs -> target
+          cache-on-failure: true
+      - name: Build codex-cli release
+        shell: pwsh
+        run: |
+          $build = Start-Process cargo -ArgumentList @('build','-p','codex-cli','--bin','codex','--release') -NoNewWindow -PassThru
+          while (-not $build.HasExited) {
+            Write-Host ("[{0}] cargo build active (PID {1})" -f (Get-Date -Format 'u'), $build.Id)
+            Get-Process -Id $build.Id -ErrorAction SilentlyContinue | Select-Object Id,CPU,WorkingSet64
+            Start-Sleep -Seconds 120
+            $build.Refresh()
+          }
+          if ($build.ExitCode -ne 0) { exit $build.ExitCode }
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          Get-Item target/release/codex.exe | Select-Object FullName,Length,LastWriteTime
+          Get-FileHash target/release/codex.exe -Algorithm SHA256
+      - name: Upload CodexNative executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-native-windows-x64
+          path: codex-rs/target/release/codex.exe
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,85 @@
+steps:
+  install:
+    image: oven/bun:1.4.2
+    commands:
+      - bun install --frozen-lockfile
+      - cd launcher && bun install --frozen-lockfile
+
+  contracts:
+    image: oven/bun:1.4.2
+    depends_on:
+      - install
+    commands:
+      - bun run check-version
+      - bun run typecheck
+      - bun run launcher:typecheck
+
+  event-core:
+    image: oven/bun:1.4.2
+    depends_on:
+      - contracts
+    commands:
+      - >
+        bun test
+        tests/turn-state-machine.test.ts
+        tests/turn-actor.test.ts
+        tests/transport-session.test.ts
+        tests/chatgpt-web-transport-tracker.test.ts
+        tests/turn-lifecycle-policy.test.ts
+        tests/dom-lifecycle-adapter.test.ts
+        tests/web-turn-lifecycle-coordinator.test.ts
+        tests/web-turn-tool-lifecycle.test.ts
+        tests/web-turn-fault-injection.test.ts
+        tests/historical-web-turn-failures.test.ts
+        tests/compaction-session.test.ts
+        tests/compaction-projection.test.ts
+        tests/compaction-lifecycle-coordinator.test.ts
+        tests/recovery-budget.test.ts
+        tests/supervisors.test.ts
+        tests/lifecycle-observability.test.ts
+        tests/turn-lifecycle-protocol.test.ts
+
+  helper-ipc-contracts:
+    image: oven/bun:1.4.2
+    depends_on:
+      - event-core
+    commands:
+      - bun test tests/launcher-helper-client.test.ts
+
+  browser-contracts:
+    image: oven/bun:1.4.2
+    depends_on:
+      - helper-ipc-contracts
+    commands:
+      - >
+        bun test
+        tests/browser-worker-contract.test.ts
+        tests/browser-response-dom.test.ts
+
+  full-tests:
+    image: oven/bun:1.4.2
+    depends_on:
+      - browser-contracts
+    commands:
+      - bun test ./tests
+
+  launcher-tests:
+    image: node:22-bookworm-slim
+    depends_on:
+      - full-tests
+    commands:
+      - cd launcher
+      - node --test tests/*.test.cjs
+
+  build:
+    image: oven/bun:1.4.2
+    depends_on:
+      - launcher-tests
+    commands:
+      - bun run build
+      - bun run launcher:build
+
+when:
+  - event: push
+  - event: pull_request
+  - event: manual
