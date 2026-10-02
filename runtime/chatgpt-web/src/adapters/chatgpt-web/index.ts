@@ -92,6 +92,12 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Pro
   });
 }
 
+function isManagedChromeBootstrapFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Managed Chrome (?:exited before CDP became ready|CDP did not become ready within)/.test(message);
+}
+
+
 function cancellableBrowserTurn(
   run: Promise<string>,
   controller: AbortController,
@@ -1037,28 +1043,40 @@ export function createChatGptWebAdapter(
                   const runFreshCompaction = async (reason: string): Promise<string> => {
                     if (freshConversationPerTurn) console.info("[chatgpt-web] compaction uses configured fresh conversation mode");
                     else console.warn(`[chatgpt-web] retained compaction fallback=${reason}`);
-                    // Fresh compaction is a bounded phase. Each exact multipart acknowledgement
-                    // and the final accepted compact prompt re-arms the five-minute liveness budget;
-                    // transport time cannot consume the model-generation window.
-                    armHandoffDeadline();
-                    const fallbackRuntime = startRuntime(
-                      parsed,
-                      manualRequest ? environment : undefined,
-                      freshCompactionTraceId,
-                      turnCapabilities,
-                      { onCompactionProgress: armHandoffDeadline },
-                    );
-                    retainOwnershipUntil(fallbackRuntime.physicalSettlement);
-                    try {
-                      const rawSummary = await withAbort(fallbackRuntime.browser, operationSignal);
-                      await withAbort(fallbackRuntime.physicalSettlement, operationSignal);
-                      return canonicalizeCompactionHandoff(parsed, rawSummary);
-                    } catch (error) {
-                      fallbackRuntime.cancel(error instanceof Error ? error : new Error(String(error)));
-                      // The shared owner retains physical settlement independently of this error.
-                      // Neither a timeout nor operator cancellation can open a competing trace.
-                      throw error;
+                    // A daemon crash can leave Brave/Chrome releasing the dedicated runtime profile
+                    // for a brief interval. A pre-CDP failure is safe to retry because no ChatGPT
+                    // prompt can have been submitted before CDP exists.
+                    for (let attempt = 1; attempt <= 2; attempt += 1) {
+                      armHandoffDeadline();
+                      const fallbackRuntime = startRuntime(
+                        parsed,
+                        manualRequest ? environment : undefined,
+                        freshCompactionTraceId,
+                        turnCapabilities,
+                        { onCompactionProgress: armHandoffDeadline },
+                      );
+                      retainOwnershipUntil(fallbackRuntime.physicalSettlement);
+                      try {
+                        const rawSummary = await withAbort(fallbackRuntime.browser, operationSignal);
+                        await withAbort(fallbackRuntime.physicalSettlement, operationSignal);
+                        return canonicalizeCompactionHandoff(parsed, rawSummary);
+                      } catch (error) {
+                        const cause = error instanceof Error ? error : new Error(String(error));
+                        fallbackRuntime.cancel(cause);
+                        if (attempt >= 2 || operationSignal.aborted || !isManagedChromeBootstrapFailure(cause)) {
+                          // The shared owner retains physical settlement independently of this error.
+                          // Neither a timeout nor operator cancellation can open a competing trace.
+                          throw cause;
+                        }
+                        await withAbort(fallbackRuntime.physicalSettlement, operationSignal);
+                        console.warn(
+                          `[chatgpt-web] compaction browser bootstrap retry attempt=${attempt + 1} cause=${cause.message}`,
+                        );
+                        armHandoffDeadline();
+                        await withAbort(new Promise<void>(resolveRetry => setTimeout(resolveRetry, 750)), operationSignal);
+                      }
                     }
+                    throw new Error("Fresh compaction browser bootstrap retry exhausted unexpectedly");
                   };
                   let source: ChatGptTurnSession | undefined;
                   let preserveFinalResponse = false;

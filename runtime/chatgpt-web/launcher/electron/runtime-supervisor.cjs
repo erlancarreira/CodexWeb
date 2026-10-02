@@ -759,7 +759,29 @@ class RuntimeSupervisor {
       if (!body || typeof body !== "object" || !Array.isArray(body.events)) {
         throw new Error("response has no events array");
       }
-      const cutoff = Date.now() - TUNNEL_MCP_FAILURE_RECENCY_MS;
+      const registrations = body.events.filter(event => {
+        if (!event || typeof event !== "object" || event.message !== "dispatcher channels registered") return false;
+        const channels = event.attrs?.channels;
+        return Array.isArray(channels) && channels.some(channel => (
+          channel?.name === "main"
+          && channel?.routable_now === true
+          && channel?.supports_mcp === true
+        ));
+      });
+      const registration = registrations.at(-1);
+      if (!registration) {
+        return {
+          observed: true,
+          ok: false,
+          fatal: false,
+          detail: "MCP dispatcher has not registered a routable main channel yet",
+        };
+      }
+
+      const cutoff = Math.max(
+        Date.now() - TUNNEL_MCP_FAILURE_RECENCY_MS,
+        Number.isFinite(Date.parse(registration.time)) ? Date.parse(registration.time) : 0,
+      );
       const failure = body.events.findLast(event => {
         if (!event || typeof event !== "object") return false;
         const attrs = event.attrs && typeof event.attrs === "object" ? event.attrs : {};
@@ -773,7 +795,7 @@ class RuntimeSupervisor {
           && ["initialize", "tools/call"].includes(attrs.rpc_method);
       });
       if (!failure) {
-        return { observed: true, ok: true, fatal: false, detail: "MCP transport has no recent internal failures" };
+        return { observed: true, ok: true, fatal: false, detail: "MCP dispatcher main channel is routable" };
       }
       return {
         observed: true,

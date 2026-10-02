@@ -1514,6 +1514,52 @@ test.each([false, true])("configured fresh compaction waits for cleanup and pres
   }
 });
 
+
+test("fresh compaction retries one pre-CDP managed-browser bootstrap failure", async () => {
+  const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-fresh-bootstrap-retry-"));
+  const provider: CodexProviderConfig = {
+    adapter: "chatgpt-web",
+    baseUrl: `browser://fresh-bootstrap-retry-${Date.now()}`,
+    chatgptWeb: {
+      browserHost: "launcher",
+      browserHostDescriptorPath: join(root, "launcher.json"),
+      brokerSocketPath: defaultBrokerEndpoint(root),
+      localToolsEnabled: true,
+      solAvailable: true,
+      extraHighAvailable: true,
+      proAvailable: true,
+      experimentalFreshConversationPerTurn: true,
+    },
+  };
+  const worker = ChatGptBrowserWorker.forProvider(provider);
+  const originalRun = worker.run.bind(worker);
+  let starts = 0;
+  (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async () => {
+    starts += 1;
+    if (starts === 1) {
+      throw new Error("Managed Chrome exited before CDP became ready (exitCode=21)");
+    }
+    return "Recovered checkpoint after managed browser bootstrap retry";
+  };
+  const events: AdapterEvent[] = [];
+  try {
+    await createChatGptWebAdapter(provider).runTurn!(
+      request(true),
+      { headers: new Headers() },
+      event => events.push(event),
+    );
+    expect(starts).toBe(2);
+    expect(events.some(event => event.type === "text_delta"
+      && event.text.includes("Recovered checkpoint after managed browser bootstrap retry"))).toBeTrue();
+    expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "stop", endTurn: true });
+  } finally {
+    (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;
+    chatGptTurnSessions.clear();
+    await TurnBroker.forSocket(provider.chatgptWeb!.brokerSocketPath!).close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test.each([false, true])("fresh multipart compaction preserves phase budgets with fresh mode=%s", async freshConversation => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-phased-fallback-compact-"));
   const provider: CodexProviderConfig = {

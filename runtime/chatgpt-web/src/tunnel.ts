@@ -6,8 +6,8 @@ import type { AppConfig, BrowserInteractionMode, TunnelConfig } from "./config";
 import { atomicWriteFile, getConfigDir } from "./config";
 import { runCommand, runChecked } from "./process";
 
-export const TUNNEL_VERSION = "0.0.12";
-const MIGRATABLE_TUNNEL_VERSIONS = new Set(["0.0.10"]);
+export const TUNNEL_VERSION = "0.0.15";
+const MIGRATABLE_TUNNEL_VERSIONS = new Set(["0.0.10", "0.0.12"]);
 const RELEASE_BASE = `https://github.com/openai/tunnel-client/releases/download/v${TUNNEL_VERSION}`;
 const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024;
 export const TUNNEL_READY_TIMEOUT_MS = 120_000;
@@ -308,7 +308,7 @@ export function stopTunnel(config: AppConfig): void {
     && !/not found|not running|unknown alias|\balias\b[^\r\n]{0,160}\bis not known\b/i.test(
       `${result.stdout}\n${result.stderr}`,
     )) {
-    // v0.0.12 clears its saved PID even when SIGTERM times out. Its subsequent
+    // v0.0.15 clears its saved PID even when SIGTERM times out. Its subsequent
     // "stopped" inventory is not exit evidence; probe the PID from the stop error.
     if (tunnelStopProcessExited(result.stdout, settings.alias)) {
       console.warn("[codex-chatgpt-web] tunnel stop timed out; OS confirmed process exit");
@@ -420,7 +420,7 @@ export function parseTunnelStatus(output: string, alias: string, exitStatus = 0)
     if (!["stopped", "starting", "healthy", "ready"].includes(state)) {
       throw new Error("local inventory has an unsupported runtime state");
     }
-    // tunnel-client 0.0.12 derives these states from the live process and local healthz/readyz
+    // tunnel-client 0.0.15 derives these states from the live process and local healthz/readyz
     // probes. It does not need the optional remote control-plane lookup made by `status`.
     const processRunning = state !== "stopped";
     const healthy = state === "healthy" || state === "ready";
@@ -463,6 +463,128 @@ export async function waitForTunnelReady(
   while (!status.ok && Date.now() < deadline) {
     await new Promise(resolveWait => setTimeout(resolveWait, TUNNEL_STATUS_POLL_INTERVAL_MS));
     status = tunnelStatus(config);
+  }
+  return status;
+}
+
+function tunnelHealthUrlFile(config: AppConfig): string | undefined {
+  const settings = tunnel(config);
+  const result = runCommand(settings.binaryPath, ["runtimes", "list", "--json"], { timeout: 10_000 });
+  if (result.status !== 0) return undefined;
+  try {
+    const parsed = JSON.parse(tunnelCommandOutput(result)) as { aliases?: unknown[] };
+    if (!Array.isArray(parsed.aliases)) return undefined;
+    const matches = parsed.aliases.filter(candidate => (
+      candidate && typeof candidate === "object"
+      && (candidate as Record<string, unknown>).alias === settings.alias
+    ));
+    if (matches.length !== 1) return undefined;
+    const healthFile = (matches[0] as Record<string, unknown>).health_url_file;
+    return typeof healthFile === "string" && healthFile.trim() ? healthFile : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function probeTunnelDispatch(config: AppConfig): Promise<TunnelRuntimeStatus> {
+  const healthFile = tunnelHealthUrlFile(config);
+  if (!healthFile || !existsSync(healthFile)) {
+    return {
+      ok: false,
+      processRunning: false,
+      healthy: false,
+      ready: false,
+      detail: "tunnel local health endpoint is not published yet",
+    };
+  }
+
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(readFileSync(healthFile, "utf8").trim());
+  } catch {
+    return {
+      ok: false,
+      processRunning: false,
+      healthy: false,
+      ready: false,
+      detail: "tunnel local health endpoint is invalid",
+    };
+  }
+  if (baseUrl.protocol !== "http:" || baseUrl.hostname !== "127.0.0.1" || !baseUrl.port) {
+    return {
+      ok: false,
+      processRunning: false,
+      healthy: false,
+      ready: false,
+      detail: "tunnel local health endpoint is not verified loopback HTTP",
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2_000);
+  try {
+    const root = baseUrl.toString().replace(/\/$/, "");
+    const [health, ready, logs] = await Promise.all([
+      fetch(`${root}/healthz`, { signal: controller.signal }),
+      fetch(`${root}/readyz`, { signal: controller.signal }),
+      fetch(`${root}/api/logs?limit=250`, { signal: controller.signal }),
+    ]);
+    if (!health.ok || !ready.ok || !logs.ok) {
+      return {
+        ok: false,
+        processRunning: health.ok,
+        healthy: health.ok,
+        ready: false,
+        detail: `health=${health.status}; ready=${ready.status}; logs=${logs.status}`,
+      };
+    }
+    const body = await logs.json() as { events?: unknown[] };
+    const mainRoutable = Array.isArray(body.events) && body.events.some(event => {
+      if (!event || typeof event !== "object") return false;
+      const record = event as Record<string, unknown>;
+      if (record.message !== "dispatcher channels registered") return false;
+      const attrs = record.attrs && typeof record.attrs === "object"
+        ? record.attrs as Record<string, unknown>
+        : {};
+      return Array.isArray(attrs.channels) && attrs.channels.some(channel => (
+        channel && typeof channel === "object"
+        && (channel as Record<string, unknown>).name === "main"
+        && (channel as Record<string, unknown>).routable_now === true
+        && (channel as Record<string, unknown>).supports_mcp === true
+      ));
+    });
+    return {
+      ok: mainRoutable,
+      processRunning: true,
+      healthy: true,
+      ready: mainRoutable,
+      state: mainRoutable ? "ready" : "healthy",
+      detail: mainRoutable
+        ? "process_running=true healthy=true ready=true main_routable=true"
+        : "process_running=true healthy=true ready=false main_routable=false",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      processRunning: false,
+      healthy: false,
+      ready: false,
+      detail: `tunnel local readiness probe failed: ${safeTunnelDetail(error instanceof Error ? error.message : String(error))}`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function waitForTunnelDispatchReady(
+  config: AppConfig,
+  timeoutMs = TUNNEL_READY_TIMEOUT_MS,
+): Promise<TunnelRuntimeStatus> {
+  const deadline = Date.now() + timeoutMs;
+  let status = await probeTunnelDispatch(config);
+  while (!status.ok && Date.now() < deadline) {
+    await new Promise(resolveWait => setTimeout(resolveWait, 250));
+    status = await probeTunnelDispatch(config);
   }
   return status;
 }

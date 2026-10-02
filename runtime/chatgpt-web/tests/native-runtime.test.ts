@@ -32,7 +32,7 @@ function dependencies(
     platform: "linux",
     tunnelStatus: () => ({ ok: true, processRunning: true, healthy: true, ready: true, state: "ready", detail: "ready" }),
     connectTunnel: () => {},
-    waitForTunnelReady: async () => ({ ok: true, processRunning: true, healthy: true, ready: true, state: "ready", detail: "ready" }),
+    waitForTunnelDispatchReady: async () => ({ ok: true, processRunning: true, healthy: true, ready: true, state: "ready", detail: "ready" }),
     ...overrides,
   };
 }
@@ -54,15 +54,17 @@ describe("native Codex runtime preparation", () => {
       platform: "win32",
       tunnelStatus: () => ({ ok: false, processRunning: false, healthy: false, ready: false, state: "stopped", detail: "stopped" }),
       connectTunnel: () => { connected += 1; },
-      waitForTunnelReady: async () => {
+      waitForTunnelDispatchReady: async () => {
         waited += 1;
-        return { ok: true, processRunning: true, healthy: true, ready: true, state: "ready", detail: "ready" };
+        return waited === 1
+          ? { ok: false, processRunning: false, healthy: false, ready: false, state: "stopped", detail: "not routable yet" }
+          : { ok: true, processRunning: true, healthy: true, ready: true, state: "ready", detail: "ready" };
       },
     });
 
     await expect(prepareNativeRuntime(original, deps)).resolves.toBe(original);
     expect(connected).toBe(1);
-    expect(waited).toBe(1);
+    expect(waited).toBe(2);
   });
 
   test("does not reconnect an already-ready Windows tunnel", async () => {

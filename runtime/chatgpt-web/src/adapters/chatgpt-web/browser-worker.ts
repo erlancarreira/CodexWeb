@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
@@ -146,6 +146,72 @@ async function findFreeLoopbackPort(): Promise<number> {
       });
     });
   });
+}
+
+const MANAGED_CHROME_SINGLETON_FILES = ["SingletonLock", "SingletonCookie", "SingletonSocket"] as const;
+
+export function isManagedChromeProfileConflict(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Managed Chrome exited before CDP became ready \(exitCode=21\)/.test(message);
+}
+
+function windowsManagedChromeProfilePids(profileDir: string): number[] {
+  if (process.platform !== "win32") return [];
+  const probe = spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$needle=$env:CODEX_WEB_MANAGED_PROFILE_ARG; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($needle) } | Select-Object -ExpandProperty ProcessId",
+    ],
+    {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5_000,
+      env: {
+        ...process.env,
+        CODEX_WEB_MANAGED_PROFILE_ARG: `--user-data-dir=${profileDir}`,
+      },
+    },
+  );
+  if (probe.error || probe.status !== 0) return [];
+  return probe.stdout
+    .split(/\r?\n/)
+    .map(value => Number.parseInt(value.trim(), 10))
+    .filter(pid => Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid);
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === "EPERM";
+  }
+}
+
+export async function recoverManagedChromeProfileForLaunch(profileDir: string): Promise<number[]> {
+  const recoveredPids = windowsManagedChromeProfilePids(profileDir);
+  for (const pid of recoveredPids) {
+    const stopped = spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 10_000,
+    });
+    if (stopped.error) throw stopped.error;
+    if (stopped.status !== 0 && processIsAlive(pid)) {
+      const detail = stopped.stderr?.trim() || stopped.stdout?.trim() || `status ${stopped.status}`;
+      throw new Error(`Could not terminate stale managed Chrome process ${pid}: ${detail}`);
+    }
+  }
+  if (recoveredPids.length > 0) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  for (const name of MANAGED_CHROME_SINGLETON_FILES) {
+    rmSync(join(profileDir, name), { force: true });
+  }
+  return recoveredPids;
 }
 
 async function waitForManagedChromeCdp(
@@ -3101,20 +3167,42 @@ export class ChatGptBrowserWorker {
           : ["--headless=new", "--window-size=1280,720"]),
         "about:blank",
       ];
-      const chromeProcess = spawn(this.config.chromeExecutablePath, chromeArgs, {
-        env: process.env,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      this.managedChromeProcess = chromeProcess;
-      let browser: Browser;
-      try {
-        await waitForManagedChromeCdp(cdpPort, chromeProcess);
-        browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`, { timeout: 30_000 });
-      } catch (error) {
-        chromeProcess.kill();
-        if (this.managedChromeProcess === chromeProcess) this.managedChromeProcess = undefined;
-        throw error;
+      await recoverManagedChromeProfileForLaunch(profileDir);
+      let browser: Browser | undefined;
+      let chromeProcess: ChildProcess | undefined;
+      let launchError: unknown;
+      for (let launchAttempt = 1; launchAttempt <= 2; launchAttempt += 1) {
+        const attemptPort = launchAttempt === 1 ? cdpPort : await findFreeLoopbackPort();
+        const attemptArgs = chromeArgs.map(arg => (
+          arg.startsWith("--remote-debugging-port=")
+            ? `--remote-debugging-port=${attemptPort}`
+            : arg
+        ));
+        chromeProcess = spawn(this.config.chromeExecutablePath, attemptArgs, {
+          env: process.env,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        this.managedChromeProcess = chromeProcess;
+        try {
+          await waitForManagedChromeCdp(attemptPort, chromeProcess);
+          browser = await chromium.connectOverCDP(`http://127.0.0.1:${attemptPort}`, { timeout: 30_000 });
+          launchError = undefined;
+          break;
+        } catch (error) {
+          launchError = error;
+          chromeProcess.kill();
+          if (this.managedChromeProcess === chromeProcess) this.managedChromeProcess = undefined;
+          if (launchAttempt >= 2 || !isManagedChromeProfileConflict(error)) break;
+          const stalePids = await recoverManagedChromeProfileForLaunch(profileDir);
+          console.warn(
+            `[chatgpt-web] managed Chrome profile conflict recovered attempt=${launchAttempt + 1} stalePids=${stalePids.join(",") || "none"}`,
+          );
+          await new Promise(resolve => setTimeout(resolve, 750));
+        }
+      }
+      if (!browser || !chromeProcess) {
+        throw launchError instanceof Error ? launchError : new Error(String(launchError ?? "Managed Chrome failed to launch"));
       }
       const context = browser.contexts()[0];
       if (!context) {

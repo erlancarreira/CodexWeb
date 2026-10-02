@@ -6,7 +6,7 @@ import {
 } from "./browser-login";
 import { saveConfig, type AppConfig } from "./config";
 import { exportLauncherBrowserStorageState } from "./launcher-browser-host";
-import { connectTunnel, tunnelStatus, waitForTunnelReady, type TunnelRuntimeStatus } from "./tunnel";
+import { connectTunnel, tunnelStatus, waitForTunnelDispatchReady, type TunnelRuntimeStatus } from "./tunnel";
 
 export interface NativeRuntimeDependencies {
   browserLoginStateExists(config: AppConfig): boolean;
@@ -19,7 +19,7 @@ export interface NativeRuntimeDependencies {
   platform: NodeJS.Platform;
   tunnelStatus(config: AppConfig): TunnelRuntimeStatus;
   connectTunnel(config: AppConfig): void;
-  waitForTunnelReady(config: AppConfig): Promise<TunnelRuntimeStatus>;
+  waitForTunnelDispatchReady(config: AppConfig, timeoutMs?: number): Promise<TunnelRuntimeStatus>;
 }
 
 const defaultDependencies: NativeRuntimeDependencies = {
@@ -30,7 +30,7 @@ const defaultDependencies: NativeRuntimeDependencies = {
   platform: process.platform,
   tunnelStatus,
   connectTunnel,
-  waitForTunnelReady,
+  waitForTunnelDispatchReady,
 };
 
 async function ensureNativeFullTunnel(
@@ -38,11 +38,17 @@ async function ensureNativeFullTunnel(
   dependencies: NativeRuntimeDependencies,
 ): Promise<void> {
   if (config.mode !== "full" || dependencies.platform !== "win32") return;
-  if (dependencies.tunnelStatus(config).ok) return;
-  dependencies.connectTunnel(config);
-  const status = await dependencies.waitForTunnelReady(config);
+
+  // The tunnel-client local inventory can report "stopped" on Windows even while a launcher-owned
+  // process is live. The loopback readiness endpoint plus a routable MCP main channel are the
+  // authoritative precondition for releasing the first native request.
+  const existingDispatch = await dependencies.waitForTunnelDispatchReady(config, 1_500);
+  if (existingDispatch.ok) return;
+
+  if (!dependencies.tunnelStatus(config).ok) dependencies.connectTunnel(config);
+  const status = await dependencies.waitForTunnelDispatchReady(config);
   if (!status.ok) {
-    throw new Error(`Native Codex tunnel did not become ready: ${status.detail}`);
+    throw new Error(`Native Codex tunnel did not become MCP-routable: ${status.detail}`);
   }
 }
 

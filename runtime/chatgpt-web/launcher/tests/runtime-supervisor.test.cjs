@@ -42,6 +42,20 @@ async function localHealthServer(statusForPath = () => 200, bodyForPath = () => 
   };
 }
 
+function routableMcpEvents(extra = []) {
+  return [{
+    time: new Date(Date.now() - 1_000).toISOString(),
+    level: "INFO",
+    message: "dispatcher channels registered",
+    attrs: {
+      channels: [
+        { name: "harpoon", routable_now: false, supports_mcp: true },
+        { name: "main", routable_now: true, supports_mcp: true },
+      ],
+    },
+  }, ...extra];
+}
+
 function launcherConfig(descriptorPath, overrides = {}) {
   const root = path.dirname(descriptorPath);
   return {
@@ -513,7 +527,7 @@ test("tunnel readiness preserves a native managed process identity when one is r
 test("steady tunnel monitoring uses the runtime local health endpoints without a control-plane status lookup", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-local-tunnel-health-"));
   const health = await localHealthServer(() => 200, pathname => pathname.startsWith("/api/logs")
-    ? JSON.stringify({ events: [] }) : "ok");
+    ? JSON.stringify({ events: routableMcpEvents() }) : "ok");
   const supervisor = new RuntimeSupervisor({
     app: { getVersion: () => "0.2.0", isPackaged: false },
     logger: { info() {}, warn() {}, error() {} },
@@ -591,7 +605,7 @@ test("recent internal MCP transport failures override false-green tunnel readine
     () => 200,
     pathname => pathname.startsWith("/api/logs")
       ? JSON.stringify({
-        events: [{
+        events: routableMcpEvents([{
           time: new Date().toISOString(),
           level: "WARN",
           message: "dispatcher received MCP upstream error; posted error response to control plane",
@@ -601,7 +615,7 @@ test("recent internal MCP transport failures override false-green tunnel readine
             upstream_response_received: false,
             rpc_method: "initialize",
           },
-        }],
+        }]),
       })
       : "ok",
   );
@@ -631,7 +645,7 @@ test("ready inventory cannot replace missing MCP evidence, and local evidence re
   let diagnosticsAvailable = false;
   const health = await localHealthServer(
     pathname => pathname.startsWith("/api/logs") && !diagnosticsAvailable ? 503 : 200,
-    pathname => pathname.startsWith("/api/logs") ? JSON.stringify({ events: [] }) : "ok",
+    pathname => pathname.startsWith("/api/logs") ? JSON.stringify({ events: routableMcpEvents() }) : "ok",
   );
   const supervisor = new RuntimeSupervisor({
     app: { getVersion: () => "0.2.0", isPackaged: false },
@@ -764,7 +778,7 @@ test("managed startup fails immediately when native status reports a stopped run
 test("launcher adopts a healthy native managed tunnel without spawning a foreground wrapper", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-managed-tunnel-adopt-"));
   const health = await localHealthServer(() => 200, pathname => pathname.startsWith("/api/logs")
-    ? JSON.stringify({ events: [] }) : "ok");
+    ? JSON.stringify({ events: routableMcpEvents() }) : "ok");
   const binaryPath = path.join(root, "tunnel-client");
   const runtimeKeyFile = path.join(root, "runtime.key");
   const profileDir = path.join(root, "profiles");
@@ -825,7 +839,7 @@ test("first launcher tunnel startup creates its missing profile and keeps the ve
 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-first-tunnel-"));
   const health = await localHealthServer(() => 200, pathname => pathname.startsWith("/api/logs")
-    ? JSON.stringify({ events: [] }) : "ok");
+    ? JSON.stringify({ events: routableMcpEvents() }) : "ok");
   const profileDir = path.join(root, "profiles");
   const profile = path.join(profileDir, "first-setup.yaml");
   const binaryPath = path.join(root, "tunnel-client");
@@ -884,10 +898,10 @@ for (const existingReady of [true, false]) {
   test(`a ${existingReady ? "previously running" : "newly connected"} tunnel cannot start monitoring before MCP verification`, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-tunnel-start-proof-"));
     const health = await localHealthServer(() => 200, pathname => pathname.startsWith("/api/logs")
-      ? JSON.stringify({ events: [{ time: new Date().toISOString(),
+      ? JSON.stringify({ events: routableMcpEvents([{ time: new Date().toISOString(),
         message: "dispatcher received MCP upstream error; posted error response to control plane",
         attrs: { failure_source: "client_internal", status_code: 502, upstream_response_received: false, rpc_method: "tools/call" },
-      }] }) : "ok");
+      }]) }) : "ok");
     const supervisor = new RuntimeSupervisor({
       app: { getVersion: () => "0.2.0", isPackaged: false },
       logger: { info() {}, warn() {}, error() {} },

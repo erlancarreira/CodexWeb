@@ -334,6 +334,10 @@ test("automatic managed Chrome is truly headless and compaction respects Tempora
   expect(workerSource).toContain("return await this.newManagedPage(context);");
   expect(workerSource).toContain("const replacement = await this.newManagedPage(context);");
   expect(workerSource).toContain("const useSavedChatSurface = this.config.useSavedChats;");
+  expect(workerSource).toContain("await recoverManagedChromeProfileForLaunch(profileDir);");
+  expect(workerSource).toContain("for (let launchAttempt = 1; launchAttempt <= 2; launchAttempt += 1)");
+  expect(workerSource).toContain("isManagedChromeProfileConflict(error)");
+  expect(workerSource).toContain('const MANAGED_CHROME_SINGLETON_FILES = ["SingletonLock", "SingletonCookie", "SingletonSocket"] as const;');
   expect(workerSource).not.toContain("this.config.useSavedChats || turn.compaction === true");
 });
 
