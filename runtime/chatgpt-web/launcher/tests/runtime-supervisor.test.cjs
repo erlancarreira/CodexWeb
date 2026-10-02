@@ -834,20 +834,20 @@ test("launcher adopts a healthy native managed tunnel without spawning a foregro
   }
 });
 
-test("first launcher tunnel startup creates its missing profile and keeps the verified runtime alive", {
-  skip: process.platform === "win32", // Executable manager fixture uses a Unix shebang.
-}, async () => {
+test("first launcher tunnel startup creates its missing profile and keeps the verified runtime alive", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-web-gpt-first-tunnel-"));
   const health = await localHealthServer(() => 200, pathname => pathname.startsWith("/api/logs")
     ? JSON.stringify({ events: routableMcpEvents() }) : "ok");
   const profileDir = path.join(root, "profiles");
+  fs.mkdirSync(profileDir, { recursive: true });
   const profile = path.join(profileDir, "first-setup.yaml");
-  const binaryPath = path.join(root, "tunnel-client");
+  const binaryPath = process.execPath;
   const runtimeKeyFile = path.join(root, "runtime.key");
   const eventPath = path.join(root, "commands.jsonl");
-  fs.writeFileSync(binaryPath, `#!/usr/bin/env node
+  const managerScript = path.join(profileDir, "runtimes");
+  fs.writeFileSync(managerScript, `
 const fs = require("node:fs");
-const args = process.argv.slice(2);
+const args = ["runtimes", ...process.argv.slice(2)];
 const profile = ${JSON.stringify(profile)};
 fs.appendFileSync(${JSON.stringify(eventPath)}, JSON.stringify(args) + "\\n");
 if (args[1] === "connect") {
@@ -867,7 +867,7 @@ if (args[1] === "connect") {
     live_runtime: { base_url: ${JSON.stringify(health.baseUrl)}, system: { pid: ${process.pid} } }
   }] : [] }));
 } else process.exitCode = 2;
-`, { mode: 0o700 });
+`);
   fs.writeFileSync(runtimeKeyFile, "fixture");
   const supervisor = new RuntimeSupervisor({
     app: { getVersion: () => "0.2.0", isPackaged: false },
