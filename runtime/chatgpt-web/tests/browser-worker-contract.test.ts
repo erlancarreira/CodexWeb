@@ -2569,17 +2569,18 @@ test("retained tool turns insert into the connector-bound composer without selec
   expect(calls).toEqual(["fill", "focus", "insert", "assert"]);
 });
 
-test("image attachment readiness accepts page-wide filename evidence with localized labels", async () => {
+test("image attachment readiness accepts native file-input evidence when ChatGPT hides attachment chips", async () => {
   const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
   const calls: Array<[string, string?]> = [];
-  let filesSet = false;
-  const zeroEvidence = {
-    or(other: unknown) { return other; },
-    count: async () => 0,
+  let changeListener: (() => void) | undefined;
+  const inputElement = {
+    dataset: {} as Record<string, string>,
+    files: [] as Array<{ name: string }>,
+    addEventListener: (_name: string, listener: () => void) => { changeListener = listener; },
   };
-  const filenameEvidence = {
+  const zeroEvidence = {
     or() { return this; },
-    count: async () => filesSet ? 1 : 0,
+    count: async () => 0,
   };
   const attachmentSurfaces = { count: async () => 0 };
   const send = {
@@ -2605,29 +2606,20 @@ test("image attachment readiness accepts page-wide filename evidence with locali
       expect(state).toEqual({ state: "attached", timeout: 20_000 });
       calls.push(["inputReady"]);
     },
+    evaluate: async (fn: (element: typeof inputElement) => unknown) => fn(inputElement),
     setInputFiles: async (files: Array<{ name: string }>) => {
-      filesSet = true;
+      inputElement.files = files;
+      changeListener?.();
       calls.push(["setFiles", files.map(file => file.name).join(",")]);
     },
   };
   const page = {
-    getByRole: (role: string, options: { name: string; exact: boolean }) => {
-      expect(role).toBe("group");
-      expect(options).toEqual({ name: "codex-input-image-1.png", exact: true });
-      return zeroEvidence;
-    },
-    getByText: (value: string, options: { exact: boolean }) => {
-      expect(value).toBe("codex-input-image-1.png");
-      expect(options).toEqual({ exact: true });
-      return zeroEvidence;
-    },
+    getByRole: () => zeroEvidence,
+    getByText: () => zeroEvidence,
     locator: (selector: string) => {
       if (selector === 'input[data-testid="upload-photos-input"], form[data-chatgpt-composer] input[type="file"][multiple]:not([accept])') return input;
       if (selector === ".composer-attachment-surface") return attachmentSurfaces;
-      if (selector.startsWith("[aria-label*=")) {
-        expect(selector).toContain("codex-input-image-1.png");
-        return filenameEvidence;
-      }
+      if (selector.startsWith("[aria-label*=")) return zeroEvidence;
       if (selector === '[role="alert"]') return { allInnerTexts: async () => [] };
       return { last: () => composer };
     },
