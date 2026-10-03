@@ -5029,7 +5029,9 @@ export class ChatGptBrowserWorker {
     });
     await input.setInputFiles(files);
     const nativeInputNames = await input.evaluate((element) => {
-      const raw = (element as HTMLInputElement).dataset.codexWebUploadEvidence;
+      const dataset = (element as HTMLInputElement).dataset;
+      const raw = dataset.codexWebUploadEvidence;
+      delete dataset.codexWebUploadEvidence;
       if (!raw) return [];
       try {
         const parsed = JSON.parse(raw);
@@ -5040,7 +5042,7 @@ export class ChatGptBrowserWorker {
     }).catch(() => [] as string[]);
     const expectedNames = files.map(file => file.name);
     const nativeInputEvidence = nativeInputNames.length === expectedNames.length
-      && expectedNames.every(name => nativeInputNames.includes(name));
+      && [...nativeInputNames].sort().every((name, index) => name === [...expectedNames].sort()[index]);
     let accepted = nativeInputEvidence;
     let evidenceCounts = attachmentEvidenceBaselines;
     const attachmentDeadline = Date.now() + 60_000;
