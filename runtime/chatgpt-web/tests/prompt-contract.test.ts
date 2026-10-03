@@ -68,6 +68,8 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(transportOnly).toContain("For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.");
   expect(transportOnly).toContain("Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.");
   expect(transportOnly).toContain("Use actual Codex Native results as evidence for local observations and effects.");
+  expect(transportOnly).toContain("On Windows, keep independent read-only inspections as separate command tool calls.");
+  expect(transportOnly).toContain("Do not join unrelated inspection commands with shell separators merely to batch them");
   expect(transportOnly).toContain("A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.");
   expect(transportOnly).toContain("After a deterministic tool failure, update the working hypothesis from that result");
   expect(transportOnly).toContain("do not repeat the same call unless its inputs or observable state changed.");
