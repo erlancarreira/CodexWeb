@@ -5044,7 +5044,7 @@ export class ChatGptBrowserWorker {
     let accepted = nativeInputEvidence;
     let evidenceCounts = attachmentEvidenceBaselines;
     const attachmentDeadline = Date.now() + 60_000;
-    while (Date.now() < attachmentDeadline) {
+    while (!accepted && Date.now() < attachmentDeadline) {
       evidenceCounts = await Promise.all(attachmentEvidence.map(locator => locator.count().catch(() => 0)));
       if (evidenceCounts.every((count, index) => count > attachmentEvidenceBaselines[index]!)) {
         accepted = true;
