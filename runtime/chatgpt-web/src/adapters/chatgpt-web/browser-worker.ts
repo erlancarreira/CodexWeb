@@ -5018,8 +5018,30 @@ export class ChatGptBrowserWorker {
     });
     const attachmentEvidenceBaselines = await Promise.all(attachmentEvidence.map(locator => locator.count()));
     await input.waitFor({ state: "attached", timeout: 20_000 });
+    await input.evaluate((element) => {
+      const control = element as HTMLInputElement;
+      delete control.dataset.codexWebUploadEvidence;
+      control.addEventListener("change", () => {
+        control.dataset.codexWebUploadEvidence = JSON.stringify(
+          Array.from(control.files ?? []).map(file => file.name),
+        );
+      }, { once: true });
+    });
     await input.setInputFiles(files);
-    let accepted = false;
+    const nativeInputNames = await input.evaluate((element) => {
+      const raw = (element as HTMLInputElement).dataset.codexWebUploadEvidence;
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter(value => typeof value === "string") : [];
+      } catch {
+        return [];
+      }
+    }).catch(() => [] as string[]);
+    const expectedNames = files.map(file => file.name);
+    const nativeInputEvidence = nativeInputNames.length === expectedNames.length
+      && expectedNames.every(name => nativeInputNames.includes(name));
+    let accepted = nativeInputEvidence;
     let evidenceCounts = attachmentEvidenceBaselines;
     const attachmentDeadline = Date.now() + 60_000;
     while (Date.now() < attachmentDeadline) {
@@ -5041,7 +5063,7 @@ export class ChatGptBrowserWorker {
       const filenameEvidence = evidenceCounts.filter((count, index) => count > attachmentEvidenceBaselines[index]!).length;
       const surfaceDelta = Math.max(0, await attachmentSurfaces.count().catch(() => 0) - attachmentSurfaceBaseline);
       throw new ChatGptPromptAttachmentIntegrityError(
-        `ChatGPT did not accept all prompt attachments (expected=${files.length}, filenameEvidence=${filenameEvidence}, attachmentSurfaceDelta=${surfaceDelta})`
+        `ChatGPT did not accept all prompt attachments (expected=${files.length}, nativeInputEvidence=${nativeInputEvidence ? files.length : 0}, filenameEvidence=${filenameEvidence}, attachmentSurfaceDelta=${surfaceDelta})`
         + (alerts.length > 0 ? `: ${alerts.join(" | ")}` : ""),
       );
     }
