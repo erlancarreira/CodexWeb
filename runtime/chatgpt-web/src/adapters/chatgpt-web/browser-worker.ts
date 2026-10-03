@@ -5041,8 +5041,10 @@ export class ChatGptBrowserWorker {
       }
     }).catch(() => [] as string[]);
     const expectedNames = files.map(file => file.name);
-    const nativeInputEvidence = nativeInputNames.length === expectedNames.length
-      && [...nativeInputNames].sort().every((name, index) => name === [...expectedNames].sort()[index]);
+    const sortedNativeInputNames = [...nativeInputNames].sort();
+    const sortedExpectedNames = [...expectedNames].sort();
+    const nativeInputEvidence = sortedNativeInputNames.length === sortedExpectedNames.length
+      && sortedNativeInputNames.every((name, index) => name === sortedExpectedNames[index]);
     let accepted = nativeInputEvidence;
     let evidenceCounts = attachmentEvidenceBaselines;
     const attachmentDeadline = Date.now() + 60_000;
