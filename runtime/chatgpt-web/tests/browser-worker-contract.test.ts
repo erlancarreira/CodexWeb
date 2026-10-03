@@ -2569,7 +2569,7 @@ test("retained tool turns insert into the connector-bound composer without selec
   expect(calls).toEqual(["fill", "focus", "insert", "assert"]);
 });
 
-test("image attachment readiness accepts native file-input evidence when ChatGPT hides attachment chips", async () => {
+test("five image attachments accept native file-input evidence when ChatGPT hides attachment chips", async () => {
   const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
   const calls: Array<[string, string?]> = [];
   let changeListener: (() => void) | undefined;
@@ -2629,12 +2629,21 @@ test("image attachment readiness accepts native file-input evidence when ChatGPT
   }).attachFiles;
 
   await attachFiles.call({ activeComposer: async () => composer }, page, {
-    images: [{ ref: "codex-input-image-1", imageUrl }],
+    images: Array.from({ length: 5 }, (_, index) => ({
+      ref: `codex-input-image-${index + 1}`,
+      imageUrl,
+    })),
   });
 
   expect(calls).toEqual([
     ["inputReady"],
-    ["setFiles", "codex-input-image-1.png"],
+    ["setFiles", [
+      "codex-input-image-1.png",
+      "codex-input-image-2.png",
+      "codex-input-image-3.png",
+      "codex-input-image-4.png",
+      "codex-input-image-5.png",
+    ].join(",")],
     ["sendEnabled"],
   ]);
 });
