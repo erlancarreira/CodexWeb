@@ -4124,10 +4124,6 @@ export class ChatGptBrowserWorker {
         return element.value.trimStart();
       }
       const connectorSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target], [app-mention-path^="app://"][app-mention-display-name][contenteditable="false"]';
-      if (!element.querySelector(connectorSelector)) {
-        const renderedText = element instanceof HTMLElement ? element.innerText : element.textContent;
-        return (renderedText ?? "").trimStart();
-      }
       const clone = element.cloneNode(true) as HTMLElement;
       clone.querySelectorAll(connectorSelector).forEach(part => part.remove());
       return [...clone.childNodes]

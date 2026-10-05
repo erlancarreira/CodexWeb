@@ -1378,13 +1378,17 @@ test("active composer falls back only to the focused structural textarea when kn
   expect(await activeComposer.call({}, page, 500)).toBe(fallbackComposer);
 });
 
-test("prompt readback preserves rendered line breaks from contenteditable composers", () => {
+test("prompt readback uses one deterministic contenteditable serializer with or without connectors", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   const start = workerSource.indexOf("private async attachedPromptText");
   const end = workerSource.indexOf("private async assertPromptAttached", start);
   const source = workerSource.slice(start, end);
-  expect(source).toContain('element instanceof HTMLElement ? element.innerText : element.textContent');
-  expect(source).not.toContain('return (element.textContent ?? "").trimStart()');
+  expect(source).toContain("const clone = element.cloneNode(true) as HTMLElement");
+  expect(source).toContain("clone.querySelectorAll(connectorSelector).forEach(part => part.remove())");
+  expect(source).toContain("[...clone.childNodes]");
+  expect(source).toContain('.join("\\n")');
+  expect(source).not.toContain("element.innerText");
+  expect(source).not.toContain("if (!element.querySelector(connectorSelector))");
 });
 test("prompt verification accepts safe Lexical text normalization without weakening other mismatches", async () => {
   // Lexical may preserve indentation as alternating NBSP and ASCII spaces while keeping the same
