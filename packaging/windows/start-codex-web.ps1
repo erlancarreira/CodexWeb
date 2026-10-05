@@ -1,6 +1,7 @@
 param(
   [Parameter(Position = 0)]
-  [string]$Uri
+  [string]$Uri,
+  [switch]$SkipAppLaunch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,6 +55,26 @@ if (!(Test-Path $codexConfig)) {
   [IO.File]::WriteAllText($codexConfig, $text, [Text.UTF8Encoding]::new($false))
 }
 
+
+$runtimeEntry = [string]$runtimeConfig.runtimeCommand[1]
+$runtimeRoot = Split-Path (Split-Path $runtimeEntry -Parent) -Parent
+$webLauncher = Join-Path $runtimeRoot 'bin\codex-chatgpt-web.cmd'
+
+$env:CODEX_CLI_PATH = $codexCli
+$env:CODEX_HOME = $codexHome
+$env:CODEX_CHATGPT_WEB_NATIVE = '1'
+$env:CODEX_CHATGPT_WEB_LAUNCHER = $webLauncher
+$env:CODEX_APP_SERVER_DEV_OPEN_APP_URL = 'codexweb://open'
+$env:CODEX_SPARKLE_ENABLED = 'false'
+
+# Make the Codex UI the first visible surface. Runtime bootstrap continues hidden
+# while the official Codex window owns its own loading state.
+$rootProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+  Where-Object { $_.ExecutablePath -eq $appExe -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -like "*$desktopProfile*" } |
+  Select-Object -First 1
+if (-not $SkipAppLaunch -and -not $rootProcess) {
+  Start-Process -FilePath $appExe -ArgumentList @("--user-data-dir=$desktopProfile",'--no-first-run') | Out-Null
+}
 if ([string]$runtimeConfig.browserHost -eq 'launcher') {
   if (!(Test-Path $launcherExe)) { throw "Codex Web launcher required by browserHost=launcher but not found: $launcherExe" }
   $launcherProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $launcherExe } | Select-Object -First 1
@@ -146,16 +167,6 @@ if ([string]$runtimeConfig.mode -eq 'full') {
   }
 }
 
-$runtimeEntry = [string]$runtimeConfig.runtimeCommand[1]
-$runtimeRoot = Split-Path (Split-Path $runtimeEntry -Parent) -Parent
-$webLauncher = Join-Path $runtimeRoot 'bin\codex-chatgpt-web.cmd'
-
-$env:CODEX_CLI_PATH = $codexCli
-$env:CODEX_HOME = $codexHome
-$env:CODEX_CHATGPT_WEB_NATIVE = '1'
-$env:CODEX_CHATGPT_WEB_LAUNCHER = $webLauncher
-$env:CODEX_APP_SERVER_DEV_OPEN_APP_URL = 'codexweb://open'
-$env:CODEX_SPARKLE_ENABLED = 'false'
 
 if (-not (Get-NetTCPConnection -State Listen -LocalPort 45891 -ErrorAction SilentlyContinue)) {
   Start-Process -FilePath $codexCli -ArgumentList @('app-server','--listen','ws://127.0.0.1:45891','--analytics-default-enabled') -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logDir 'appserver.out.log') -RedirectStandardError (Join-Path $logDir 'appserver.err.log') | Out-Null
@@ -167,8 +178,3 @@ if (-not (Get-NetTCPConnection -State Listen -LocalPort 45891 -ErrorAction Silen
 if (-not (Get-NetTCPConnection -State Listen -LocalPort 45891 -ErrorAction SilentlyContinue)) {
   throw 'Codex app-server did not start on 127.0.0.1:45891'
 }
-
-$rootProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $appExe -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -like "*$desktopProfile*" } | Select-Object -First 1
-if ($rootProcess) { exit 0 }
-
-Start-Process -FilePath $appExe -ArgumentList @("--user-data-dir=$desktopProfile",'--no-first-run') | Out-Null

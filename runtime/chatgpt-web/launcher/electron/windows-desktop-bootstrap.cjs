@@ -7,12 +7,14 @@ function startWindowsDesktopBootstrap({ app, logger }) {
 
   const script = path.join(process.resourcesPath, "bootstrap", "install-codex-web.ps1");
   const nativeBinary = path.join(process.resourcesPath, "native", "codex-native.exe");
+  const desktopLauncher = path.join(process.resourcesPath, "bootstrap", "CodexWeb.exe");
   const iconPath = path.join(process.resourcesPath, "bootstrap", "icon.ico");
 
-  if (!fs.existsSync(script) || !fs.existsSync(nativeBinary)) {
+  if (!fs.existsSync(script) || !fs.existsSync(nativeBinary) || !fs.existsSync(desktopLauncher)) {
     logger.warn("desktop.bootstrap_assets_missing", {
       scriptPresent: fs.existsSync(script),
       nativeBinaryPresent: fs.existsSync(nativeBinary),
+      desktopLauncherPresent: fs.existsSync(desktopLauncher),
     });
     return null;
   }
@@ -24,6 +26,7 @@ function startWindowsDesktopBootstrap({ app, logger }) {
     "-File", script,
     "-NativeBinary", nativeBinary,
     "-LauncherExecutable", process.execPath,
+    "-DesktopLauncherBinary", desktopLauncher,
   ];
   if (fs.existsSync(iconPath)) args.push("-IconPath", iconPath);
 

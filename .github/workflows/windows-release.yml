@@ -60,6 +60,16 @@ jobs:
           if ($build.ExitCode -ne 0) { exit $build.ExitCode }
           Get-FileHash target/release/codex.exe -Algorithm SHA256
 
+      - name: Build Windows GUI launcher
+        shell: pwsh
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (!(Test-Path $csc)) { throw "64-bit .NET Framework C# compiler not found: $csc" }
+          $output = Join-Path $PWD 'artifacts\CodexWeb.exe'
+          New-Item -ItemType Directory -Force (Split-Path $output -Parent) | Out-Null
+          & $csc /nologo /target:winexe /optimize+ /reference:System.Windows.Forms.dll /win32icon:runtime/chatgpt-web/launcher/assets/icon.ico "/out:$output" packaging/windows/CodexWebLauncher.cs
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $output)) { throw "CodexWeb.exe build failed" }
+          Get-FileHash $output -Algorithm SHA256
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
@@ -83,7 +93,7 @@ jobs:
 
       - name: Stage unified Windows payload
         shell: pwsh
-        run: ./scripts/stage-windows-release.ps1 -NativeBinary "$PWD/crates/codex/codex-rs/target/release/codex.exe"
+        run: ./scripts/stage-windows-release.ps1 -NativeBinary "$PWD/crates/codex/codex-rs/target/release/codex.exe" -DesktopLauncherBinary "$PWD/artifacts/CodexWeb.exe"
 
       - name: Package Codex Web
         shell: pwsh

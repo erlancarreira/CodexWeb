@@ -10,6 +10,7 @@ const vm = require("node:vm");
 
 const launcherRoot = path.resolve(__dirname, "..");
 const repositoryRoot = path.resolve(launcherRoot, "..");
+const workspaceRoot = path.resolve(repositoryRoot, "..", "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(launcherRoot, "package.json"), "utf8"));
 const repositoryManifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8"));
 
@@ -18,6 +19,34 @@ test("the public launcher command uses the Electron bootstrap", () => {
   assert.equal(repositoryManifest.scripts.launcher, repositoryManifest.scripts.app);
 });
 
+test("Windows desktop entrypoint is a GUI launcher and never exposes PowerShell", () => {
+  const installer = fs.readFileSync(path.join(workspaceRoot, "packaging", "windows", "install-codex-web.ps1"), "utf8");
+  const starter = fs.readFileSync(path.join(workspaceRoot, "packaging", "windows", "start-codex-web.ps1"), "utf8");
+  const nativeLauncher = fs.readFileSync(path.join(workspaceRoot, "packaging", "windows", "CodexWebLauncher.cs"), "utf8");
+  const stage = fs.readFileSync(path.join(workspaceRoot, "scripts", "stage-windows-release.ps1"), "utf8");
+  const desktopBootstrap = fs.readFileSync(path.join(launcherRoot, "electron", "windows-desktop-bootstrap.cjs"), "utf8");
+  const release = fs.readFileSync(path.join(workspaceRoot, ".github", "workflows", "windows-release.yml"), "utf8");
+
+  assert.match(installer, /\$desktopLauncher = Join-Path \$managedRoot 'CodexWeb\.exe'/);
+  assert.match(installer, /Write-Shortcut .*'Codex Web\.lnk'\) \$desktopLauncher/);
+  assert.doesNotMatch(installer, /Write-Shortcut .*'Codex Web\.lnk'\) 'powershell\.exe'/);
+  assert.match(installer, /\$commandValue = '"' \+ \$desktopLauncher \+ '" "%1"'/);
+  assert.match(starter, /\[switch\]\$SkipAppLaunch/);
+  assert.ok(
+    starter.indexOf("Start-Process -FilePath $appExe")
+      < starter.indexOf("$healthUrl ="),
+    "the Codex UI must open before runtime readiness waits so its own loading surface is first",
+  );
+  assert.match(nativeLauncher, /CreateNoWindow = true/);
+  assert.match(nativeLauncher, /ProcessWindowStyle\.Hidden/);
+  assert.match(nativeLauncher, /start-codex-web\.ps1/);
+  assert.match(stage, /DesktopLauncherBinary/);
+  assert.match(stage, /CodexWeb\.exe/);
+  assert.match(desktopBootstrap, /DesktopLauncherBinary/);
+  assert.match(desktopBootstrap, /CodexWeb\.exe/);
+  assert.match(release, /\/target:winexe/);
+  assert.match(release, /DesktopLauncherBinary/);
+});
 test("the full verification gate audits launcher dependencies", () => {
   const verify = fs.readFileSync(path.join(repositoryRoot, "scripts", "verify.ts"), "utf8");
   assert.equal(manifest.scripts.audit, "bun audit");

@@ -3,6 +3,8 @@ param(
   [string]$NativeBinary,
   [Parameter(Mandatory = $true)]
   [string]$LauncherExecutable,
+  [Parameter(Mandatory = $true)]
+  [string]$DesktopLauncherBinary,
   [string]$IconPath
 )
 
@@ -17,6 +19,7 @@ $codexHome = Join-Path $coreHome 'codex-home'
 
 if (!(Test-Path $NativeBinary)) { throw "Bundled CodexNative binary not found: $NativeBinary" }
 if (!(Test-Path $LauncherExecutable)) { throw "Codex Web launcher not found: $LauncherExecutable" }
+if (!(Test-Path $DesktopLauncherBinary)) { throw "Codex Web desktop launcher not found: $DesktopLauncherBinary" }
 
 $package = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue |
   Sort-Object Version -Descending |
@@ -65,6 +68,8 @@ if (-not $appExe) { throw 'Could not locate the OpenAI Codex desktop executable 
 
 New-Item -ItemType Directory -Force $binRoot, $assetsRoot, $coreHome, $codexHome | Out-Null
 Copy-Item $NativeBinary (Join-Path $binRoot 'codex-native.exe') -Force
+$desktopLauncher = Join-Path $managedRoot 'CodexWeb.exe'
+Copy-Item $DesktopLauncherBinary $desktopLauncher -Force
 Copy-Item (Join-Path $PSScriptRoot 'start-codex-web.ps1') (Join-Path $managedRoot 'start-codex-web.ps1') -Force
 Copy-Item (Join-Path $PSScriptRoot 'open-codex-web-protocol.ps1') (Join-Path $managedRoot 'open-codex-web-protocol.ps1') -Force
 if ($IconPath -and (Test-Path $IconPath)) {
@@ -99,6 +104,7 @@ $state = [ordered]@{
   appExecutable = $appExe
   launcherExecutable = (Resolve-Path $LauncherExecutable).Path
   nativeBinary = (Join-Path $binRoot 'codex-native.exe')
+  desktopLauncher = $desktopLauncher
   installedAt = [DateTimeOffset]::UtcNow.ToString('o')
 }
 $state | ConvertTo-Json -Depth 5 | Set-Content $statePath -Encoding utf8
@@ -108,8 +114,7 @@ $protocolCommand = Join-Path $protocolRoot 'shell\open\command'
 New-Item -Path $protocolCommand -Force | Out-Null
 Set-ItemProperty -Path $protocolRoot -Name '(default)' -Value 'URL:Codex Web Protocol'
 New-ItemProperty -Path $protocolRoot -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
-$protocolScript = Join-Path $managedRoot 'open-codex-web-protocol.ps1'
-$commandValue = 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $protocolScript + '" "%1"'
+$commandValue = '"' + $desktopLauncher + '" "%1"'
 Set-ItemProperty -Path $protocolCommand -Name '(default)' -Value $commandValue
 
 $shell = New-Object -ComObject WScript.Shell
@@ -126,10 +131,12 @@ function Write-Shortcut([string]$Path, [string]$Target, [string]$Arguments, [str
   $shortcut.Save()
 }
 
-$startScript = Join-Path $managedRoot 'start-codex-web.ps1'
-$psArgs = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $startScript + '"'
-Write-Shortcut (Join-Path $desktop 'Codex Web.lnk') 'powershell.exe' $psArgs $managedRoot $managedIcon
-Write-Shortcut (Join-Path $startMenuDir 'Codex Web.lnk') 'powershell.exe' $psArgs $managedRoot $managedIcon
+Write-Shortcut (Join-Path $desktop 'Codex Web.lnk') $desktopLauncher '' $managedRoot $managedIcon
+Write-Shortcut (Join-Path $startMenuDir 'Codex Web.lnk') $desktopLauncher '' $managedRoot $managedIcon
+$legacyStartMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Codex Web.lnk'
+if (Test-Path $legacyStartMenuShortcut) {
+  Write-Shortcut $legacyStartMenuShortcut $desktopLauncher '' $managedRoot $managedIcon
+}
 Write-Shortcut (Join-Path $startMenuDir 'Codex Web Settings.lnk') $LauncherExecutable '' (Split-Path $LauncherExecutable -Parent) $managedIcon
 
 $state | ConvertTo-Json -Depth 5
