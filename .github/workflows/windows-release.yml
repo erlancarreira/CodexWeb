@@ -66,8 +66,10 @@ jobs:
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
           if (!(Test-Path $csc)) { throw "64-bit .NET Framework C# compiler not found: $csc" }
           $output = Join-Path $PWD 'artifacts\CodexWeb.exe'
+          $source = (Resolve-Path 'packaging\windows\CodexWebLauncher.cs').Path
+          $icon = (Resolve-Path 'runtime\chatgpt-web\launcher\assets\icon.ico').Path
           New-Item -ItemType Directory -Force (Split-Path $output -Parent) | Out-Null
-          & $csc /nologo /target:winexe /optimize+ /reference:System.Windows.Forms.dll /win32icon:runtime/chatgpt-web/launcher/assets/icon.ico "/out:$output" packaging/windows/CodexWebLauncher.cs
+          & $csc /nologo /target:winexe /optimize+ /reference:System.Windows.Forms.dll "/win32icon:$icon" "/out:$output" $source
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $output)) { throw "CodexWeb.exe build failed" }
           Get-FileHash $output -Algorithm SHA256
       - uses: oven-sh/setup-bun@v2
