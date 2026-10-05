@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
-import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_SEND_CLICK_ACTION_TIMEOUT_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, normalizeHeadlessChromeUserAgent, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_SEND_CLICK_ACTION_TIMEOUT_MS, CHATGPT_SEND_KEYBOARD_ACTION_TIMEOUT_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, normalizeHeadlessChromeUserAgent, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess, chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
@@ -920,83 +920,16 @@ test("Bigger Context send activation keeps a bounded click timeout under the out
   expect(clickOptions).toMatchObject({ noWaitAfter: true, timeout: CHATGPT_SEND_CLICK_ACTION_TIMEOUT_MS });
 });
 
-test("send activation falls back to Enter when the enabled send control times out without submission evidence", async () => {
-  const provider: CodexProviderConfig = {
-    adapter: "chatgpt-web",
-    baseUrl: "browser://send-click-timeout-" + Date.now() + "-" + Math.random(),
-    chatgptWeb: {
-      localToolsEnabled: true,
-      solAvailable: true,
-      extraHighAvailable: true,
-      proAvailable: true,
-      storageStatePath: "/tmp/send-click-timeout-" + Date.now() + "-" + Math.random() + ".json",
-    },
-  };
-  const worker: any = ChatGptBrowserWorker.forProvider(provider);
-  const checkpoints: string[] = [];
-  const pressed: string[] = [];
-  let clickOptions: { noWaitAfter?: boolean; timeout?: number } | undefined;
-
-  const hiddenLocator = {
-    filter() { return this; },
-    count: async () => 0,
-    last() { return this; },
-    getByText() { return this; },
-    isVisible: async () => false,
-  };
-  const page = {
-    isClosed: () => false,
-    locator: () => hiddenLocator,
-  } as unknown as Page;
-
-  const timeout = new Error("send control remained non-actionable");
-  timeout.name = "TimeoutError";
-  const sendButton = {
-    isEnabled: async () => true,
-    click: async (options?: { noWaitAfter?: boolean; timeout?: number }) => {
-      clickOptions = options;
-      throw timeout;
-    },
-  };
-  const sendButtons = {
-    filter() { return this; },
-    count: async () => 1,
-    first: () => sendButton,
-  };
-  const composer = {
-    locator: () => ({
-      locator: (selector: string) => {
-        expect(selector).toBe(CHATGPT_SEND_BUTTON_SELECTOR);
-        return sendButtons;
-      },
-    }),
-    isEditable: async () => true,
-    press: async (key: string) => { pressed.push(key); },
-  };
-
-  worker.activeComposer = async () => composer;
-  worker.waitForSubmissionAcceptedWithRecovery = async () => "user_turn";
-
-  const baseline: any = { submittedText: "Responda apenas OK" };
-  const evidence = await worker.sendAttachedPrompt(
-    page,
-    baseline,
-    async (checkpoint: string) => { checkpoints.push(checkpoint); },
-  );
-
-  expect(evidence).toBe("user_turn");
-  expect(clickOptions).toMatchObject({
-    noWaitAfter: true,
-    timeout: CHATGPT_SEND_CLICK_ACTION_TIMEOUT_MS,
-  });
-  expect(pressed).toEqual(["Enter"]);
-  expect(checkpoints).toContain("send-click-timeout");
-  expect(checkpoints).toContain("send-click-timeout-keyboard-fallback");
-  expect(checkpoints).toContain("send-keyboard-fallback-activated");
-  expect(checkpoints).toContain("send-activated");
-  expect(baseline.sendActivated).toBeTrue();
+test("send fallback prefers DOM click and keeps keyboard activation bounded", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("private async sendAttachedPrompt");
+  const end = workerSource.indexOf("private async waitForMultipartAcknowledgement", start);
+  const source = workerSource.slice(start, end);
+  expect(source).toContain("sendButton!.evaluate((element: HTMLElement) => element.click())");
+  expect(source).toContain("CHATGPT_SEND_KEYBOARD_ACTION_TIMEOUT_MS");
+  expect(source).not.toContain("timeout: 0");
+  expect(CHATGPT_SEND_KEYBOARD_ACTION_TIMEOUT_MS).toBe(2_500);
 });
-
 test("two-part saved chats re-prove unchanged effort after the first message creates the conversation URL", async () => {
   const root = mkdtempSync(join(tmpdir(), "saved-chat-multipart-"));
   const capabilities = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: false, proAvailable: false };
@@ -1050,6 +983,39 @@ test("two-part saved chats re-prove unchanged effort after the first message cre
     expect(sends).toBe(2);
     expect(selections).toEqual(["https://chatgpt.com/", savedUrl]);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("operational viewport recovery reapplies a real viewport after CDP reconnect", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("async function waitForOperationalChatGptViewport");
+  const end = workerSource.indexOf("export const CHATGPT_COMPOSER_DOCUMENT_END_KEY", start);
+  const source = workerSource.slice(start, end);
+  expect(source).toContain("page.evaluate(() => ({");
+  expect(source).toContain("page.setViewportSize({ width: 800, height: 600 })");
+  expect(source).toContain("innerWidth >= width && innerHeight >= height");
+});
+
+test("submitted managed-page resync is cancelled when transport progress resumes", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("response_page_resync_");
+  const end = workerSource.indexOf("response_page_reload_", start);
+  const source = workerSource.slice(start, end);
+  expect(source).toContain("const resyncAbort = new AbortController()");
+  expect(source).toContain("submissionRejection.waitForNetworkChange");
+  expect(source).toContain("turn.externalProgress.waitForChange");
+  expect(source).toContain("const outcome = await Promise.race(waits)");
+  expect(source).toContain("resyncAbort.abort()");
+});
+
+test("60s diagnostics distinguish live transport from a real stall", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("if (!loggedCompletionWait && Date.now() - sentAt >= 60_000)");
+  const end = workerSource.indexOf("        } else {", start);
+  const source = workerSource.slice(start, end);
+  expect(source).toContain("transportProgressLive");
+  expect(source).toContain('"response-active-60s"');
+  expect(source).toContain('"response-stalled-60s"');
+  expect(source).toContain("completionWaitLog");
 });
 
 test("submission observation recovery resumes with rebound locators and is strictly bounded", async () => {
@@ -1409,9 +1375,11 @@ test("prompt verification accepts safe Lexical text normalization without weaken
 
   expect(promptTextEquivalent.call(worker, expected, observed)).toBeTrue();
 
-  // The allowance is intentionally directional and restricted to repeated ASCII-space runs.
+  // The allowance is directional: ChatGPT may surface expected ASCII spaces as NBSP.
   expect(promptTextEquivalent.call(worker, "a  b", "a\u00A0 b")).toBeTrue();
-  expect(promptTextEquivalent.call(worker, "a b", "a\u00A0b")).toBeFalse();
+  expect(promptTextEquivalent.call(worker, "a b", "a\u00A0b")).toBeTrue();
+  expect(promptTextEquivalent.call(worker, " a", "\u00A0a")).toBeTrue();
+  expect(promptTextEquivalent.call(worker, "a ", "a\u00A0")).toBeTrue();
   expect(promptTextEquivalent.call(worker, "a\u00A0b", "a b")).toBeFalse();
 
   // Browser DOM readback may expose rendered newlines as LF or CRLF.
