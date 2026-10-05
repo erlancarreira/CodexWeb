@@ -189,6 +189,7 @@ export class HttpTurnCounter {
     run: (
       signal: AbortSignal,
       bindIdentity: (identity: NativeCodexTurnIdentity) => void,
+      markTerminal: () => void,
     ) => Promise<Response>,
     clientSignal?: AbortSignal,
     platform: NodeJS.Platform = process.platform,
@@ -203,7 +204,8 @@ export class HttpTurnCounter {
       done: Promise<void>;
       finish: () => void;
       identity?: NativeCodexTurnIdentity;
-    } = { abort, done, finish };
+      terminal: boolean;
+    } = { abort, done, finish, terminal: false };
     this.active.set(id, tracked);
     let released = false;
     let clientAbortListener: (() => void) | undefined;
@@ -235,6 +237,8 @@ export class HttpTurnCounter {
         tracked.identity = identity;
         const interruptedReason = this.interrupted.get(this.identityKey(identity));
         if (interruptedReason !== undefined && !abort.signal.aborted) abort.abort(interruptedReason);
+      }, () => {
+        tracked.terminal = true;
       });
       if (!response.body) {
         release();
@@ -339,6 +343,9 @@ export class HttpTurnCounter {
           }
           // Stream failure is delivered to the client branch; lifecycle cleanup stays best-effort.
         } finally {
+          if (endpoint === "responses" && !tracked.terminal && !abort.signal.aborted) {
+            abort.abort(new DOMException("HTTP response stream ended before a terminal Responses event", "AbortError"));
+          }
           release();
         }
       })();
@@ -368,6 +375,8 @@ export interface ResponseRequestOptions {
    * any adapter event was emitted, so automatic recovery never replays accepted model work.
    */
   recoverSession?: (config: AppConfig) => Promise<unknown>;
+  /** Mark that the Responses body emitted an intentional terminal SSE event. */
+  onTerminal?: () => void;
 }
 
 function isRecoverableChatGptAuthenticationError(error: unknown): boolean {
@@ -724,6 +733,7 @@ export async function responseRequest(
           ? { stallTimeoutSec: provider.chatgptWeb.stallTimeoutSec }
           : {}),
         ...(compactionItem ? { compaction: true } : {}),
+        onTerminal: () => options.onTerminal?.(),
         onCompletedResponse: rememberCompletedResponse,
       },
     );
@@ -747,6 +757,7 @@ export async function responseRequest(
     ...(compactionItem ? { compaction: true } : {}),
   });
   rememberCompletedResponse(json);
+  options.onTerminal?.();
   return Response.json(json);
 }
 
@@ -1170,13 +1181,14 @@ export function startServer(
       if (req.method === "POST" && url.pathname === "/v1/responses") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
-          (signal, bindIdentity) => responseRequest(
+          (signal, bindIdentity, markTerminal) => responseRequest(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
             {
               onTurnIdentity: bindIdentity,
               recoverSession,
+              onTerminal: markTerminal,
             },
           ),
           req.signal,

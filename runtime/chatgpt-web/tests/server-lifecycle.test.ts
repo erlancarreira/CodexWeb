@@ -76,6 +76,57 @@ test("HTTP turn tracking uses a tee branch on Windows", async () => {
   await waitForTurnCount(turns, 0);
 });
 
+test("Windows response stream ending without a terminal SSE event aborts its tracked turn", async () => {
+  const turns = new HttpTurnCounter();
+  let source!: ReadableStreamDefaultController<Uint8Array>;
+  let observedSignal!: AbortSignal;
+  const response = await turns.track(
+    async signal => {
+      observedSignal = signal;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { source = controller; },
+      }));
+    },
+    undefined,
+    "win32",
+    "responses",
+  );
+  const reader = response.body!.getReader();
+
+  source.enqueue(new TextEncoder().encode("partial"));
+  expect((await reader.read()).done).toBe(false);
+  source.close();
+  expect((await reader.read()).done).toBe(true);
+  await waitForTurnCount(turns, 0);
+  expect(observedSignal.aborted).toBeTrue();
+});
+
+test("Windows terminal Responses stream preserves its tracked adapter state", async () => {
+  const turns = new HttpTurnCounter();
+  let source!: ReadableStreamDefaultController<Uint8Array>;
+  let observedSignal!: AbortSignal;
+  const response = await turns.track(
+    async (signal, _bindIdentity, markTerminal) => {
+      observedSignal = signal;
+      markTerminal();
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { source = controller; },
+      }));
+    },
+    undefined,
+    "win32",
+    "responses",
+  );
+  const reader = response.body!.getReader();
+
+  source.enqueue(new TextEncoder().encode("terminal"));
+  expect((await reader.read()).done).toBe(false);
+  source.close();
+  expect((await reader.read()).done).toBe(true);
+  await waitForTurnCount(turns, 0);
+  expect(observedSignal.aborted).toBeFalse();
+});
+
 test("HTTP turn tracking uses direct pull and cancellation outside Windows", async () => {
   const turns = new HttpTurnCounter();
   let source!: ReadableStreamDefaultController<Uint8Array>;
