@@ -71,7 +71,6 @@ Copy-Item $NativeBinary (Join-Path $binRoot 'codex-native.exe') -Force
 $desktopLauncher = Join-Path $managedRoot 'CodexWeb.exe'
 Copy-Item $DesktopLauncherBinary $desktopLauncher -Force
 Copy-Item (Join-Path $PSScriptRoot 'start-codex-web.ps1') (Join-Path $managedRoot 'start-codex-web.ps1') -Force
-Copy-Item (Join-Path $PSScriptRoot 'open-codex-web-protocol.ps1') (Join-Path $managedRoot 'open-codex-web-protocol.ps1') -Force
 if ($IconPath -and (Test-Path $IconPath)) {
   Copy-Item $IconPath (Join-Path $assetsRoot 'icon.ico') -Force
 }
@@ -134,9 +133,8 @@ function Write-Shortcut([string]$Path, [string]$Target, [string]$Arguments, [str
 Write-Shortcut (Join-Path $desktop 'Codex Web.lnk') $desktopLauncher '' $managedRoot $managedIcon
 Write-Shortcut (Join-Path $startMenuDir 'Codex Web.lnk') $desktopLauncher '' $managedRoot $managedIcon
 $legacyStartMenuShortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Codex Web.lnk'
-if (Test-Path $legacyStartMenuShortcut) {
-  Write-Shortcut $legacyStartMenuShortcut $desktopLauncher '' $managedRoot $managedIcon
-}
+Remove-Item $legacyStartMenuShortcut -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $managedRoot 'CodexWeb.vbs'), (Join-Path $managedRoot 'open-codex-web-protocol.ps1') -Force -ErrorAction SilentlyContinue
 Write-Shortcut (Join-Path $startMenuDir 'Codex Web Settings.lnk') $LauncherExecutable '' (Split-Path $LauncherExecutable -Parent) $managedIcon
 
 $state | ConvertTo-Json -Depth 5
