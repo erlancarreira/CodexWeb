@@ -5,7 +5,7 @@ Este documento descreve o fluxo operacional do **CodexNative Web**: instalação
 Repositório oficial:
 
 ```text
-https://github.com/erlancarreira/codex-chatgpt-web
+https://github.com/erlancarreira/CodexWeb
 ```
 
 ## 1. Componentes
@@ -52,19 +52,19 @@ Não use duas distribuições diferentes que controlem esses mesmos diretórios 
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.ps1 | iex
+irm https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.ps1 | iex
 ```
 
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.sh | sh
+curl -fsSL https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.sh | sh
 ```
 
 O canal de release é:
 
 ```text
-erlancarreira/codex-chatgpt-web
+erlancarreira/CodexWeb
 ```
 
 As variáveis de repository override existem apenas para desenvolvimento, mirrors e testes controlados. Uma instalação normal não precisa defini-las.
@@ -72,8 +72,8 @@ As variáveis de repository override existem apenas para desenvolvimento, mirror
 ### Código-fonte
 
 ```bash
-git clone https://github.com/erlancarreira/codex-chatgpt-web.git
-cd codex-chatgpt-web
+git clone https://github.com/erlancarreira/CodexWeb.git
+cd CodexWeb/runtime/chatgpt-web
 
 bun install --frozen-lockfile
 bun run app
@@ -353,13 +353,13 @@ Atualize sempre pelo mesmo canal:
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.ps1 | iex
+irm https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.ps1 | iex
 ```
 
 macOS/Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.sh | sh
+curl -fsSL https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.sh | sh
 ```
 
 Após alterações de runtime/bridge:

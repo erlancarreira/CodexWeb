@@ -1,15 +1,15 @@
 {
   "name": "codex-chatgpt-web",
-  "version": "6.2.0",
+  "version": "6.2.1",
   "private": true,
   "description": "A focused local Responses bridge that runs Codex tasks through a user-authenticated ChatGPT web session.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/erlancarreira/codex-chatgpt-web.git"
+    "url": "git+https://github.com/erlancarreira/CodexWeb.git"
   },
-  "homepage": "https://github.com/erlancarreira/codex-chatgpt-web#readme",
+  "homepage": "https://github.com/erlancarreira/CodexWeb#readme",
   "bugs": {
-    "url": "https://github.com/erlancarreira/codex-chatgpt-web/issues"
+    "url": "https://github.com/erlancarreira/CodexWeb/issues"
   },
   "packageManager": "bun@1.4.2",
   "type": "module",

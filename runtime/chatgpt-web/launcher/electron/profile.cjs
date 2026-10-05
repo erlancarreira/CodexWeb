@@ -31,11 +31,11 @@ function resolveLauncherProfile({
       : path.join(appData, "Codex Web GPT");
     return {
       kind: PRODUCTION_PROFILE,
-      displayName: "Codex Web GPT",
+      displayName: "Codex Web",
       coreHome,
       codexHome: env.CODEX_HOME?.trim()
         ? resolveUserPath(env.CODEX_HOME.trim(), homeDir)
-        : path.join(homeDir, ".codex"),
+        : path.join(coreHome, "codex-home"),
       userData,
       browserPartition: "persist:codex-web-gpt-chatgpt",
     };

@@ -182,7 +182,7 @@ export function chatGptPromptJsonBytes(text: string): number {
 }
 
 const DROPPED_IMAGE_NOTE =
-  `[older image not attached: ChatGPT accepts at most ${CHATGPT_MAX_INPUT_IMAGES} per message]`;
+  `[older image not attached: ChatGPT attachment limit reached for this message]`;
 
 /**
  * A fresh compaction epoch receives the complete canonical context, so every still-relevant image
@@ -434,7 +434,7 @@ export function compileChatGptWebPrompt(
   options?: CompileChatGptWebPromptOptions,
 ): CompiledChatGptWebPrompt {
   const manualControl = options?.manualControl === true;
-  const attachSkills = options?.experimentalSkillAttachments === true;
+  const attachSkills = options?.experimentalSkillAttachments === true && !parsed._compactionRequest;
   if (attachSkills && (manualControl || isChatGptWebZeroRiskBackendModel(parsed.modelId))) {
     throw new Error("Skills as files is unavailable in Zero Risk mode");
   }
@@ -593,11 +593,14 @@ export function compileChatGptWebPrompt(
       "The task context is complete. Execute the latest active user request now under the capability contract above.",
       "</codex_transport_resume>",
     ];
+  const maxContextImages = parsed._compactionRequest && !multipartEnabled
+    ? CHATGPT_MAX_INPUT_IMAGES - 1
+    : CHATGPT_MAX_INPUT_IMAGES;
   const build = (sourceMessages: readonly CodexMessage[], omittedMessages = 0): CompiledChatGptWebPrompt => {
     const images: ChatGptWebPromptImage[] = [];
     const budget: ImageBudget = {
       seen: 0,
-      dropped: Math.max(0, countChatGptContextImages(sourceMessages) - CHATGPT_MAX_INPUT_IMAGES),
+      dropped: Math.max(0, countChatGptContextImages(sourceMessages) - maxContextImages),
     };
     const skillFiles: ChatGptSkillFile[] = [];
     const messages = sourceMessages.map(message => {

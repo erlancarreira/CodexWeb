@@ -28,6 +28,7 @@ const MAX_CHECKPOINT_FILE_BYTES = 16 * 1024 * 1024;
 const PASSKEY_LOGIN_TIMEOUT_MS = 10 * 60_000;
 const MAX_PASSKEY_STATE_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_PASSKEY_MARKER_FILE_BYTES = 64 * 1024;
+const AUTO_ADOPT_EXTERNAL_RELEASES = new Set(["6.2.0"]);
 function collect(stream, chunks, onLine, onError) {
   let buffered = "";
   let bytes = 0;
@@ -1258,6 +1259,23 @@ class RuntimeHost {
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);
     const existing = this.runtimeConfigSnapshot();
     const currentVersion = this.app.getVersion();
+    const trustedExternalMigration = existing.owner === "external"
+      && existing.config?.version === 3
+      && existing.config?.browserHost === "managed-chrome"
+      && AUTO_ADOPT_EXTERNAL_RELEASES.has(existing.config?.releaseVersion);
+    if (trustedExternalMigration) {
+      const migration = await this.setupCore();
+      return {
+        updated: true,
+        externalMigrated: true,
+        mode: existing.mode,
+        fromVersion: existing.config.releaseVersion,
+        toVersion: currentVersion,
+        connectorMigrated: isLegacyConnectorName(validateConnectorName(existing.config?.appName)),
+        stdout: migration.stdout,
+      };
+    }
+
     const connectorMigrationRequired = existing.mode === "full"
       && isLegacyConnectorName(validateConnectorName(existing.config?.appName));
     const interactionMode = existing.config?.browserInteractionMode ?? "automatic";

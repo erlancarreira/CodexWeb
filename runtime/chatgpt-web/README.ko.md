@@ -2,20 +2,20 @@
 
 CodexNative Web은 ChatGPT Web 모델을 네이티브 Codex 워크플로에 통합하면서 스트리밍, 컨텍스트, MCP, 로컬 도구 및 컨텍스트 압축을 유지합니다. 이 프로젝트는 Web 전용이며 OpenAI API key가 필요하지 않습니다.
 
-공식 저장소: `erlancarreira/codex-chatgpt-web`
+공식 저장소: `erlancarreira/CodexWeb`
 
 ## 빠른 설치
 
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.ps1 | iex
+irm https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.ps1 | iex
 ```
 
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.sh | sh
+curl -fsSL https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.sh | sh
 ```
 
 ## 소스에서 실행
@@ -23,8 +23,8 @@ curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/mai
 Bun 1.4.2이 필요합니다.
 
 ```bash
-git clone https://github.com/erlancarreira/codex-chatgpt-web.git
-cd codex-chatgpt-web
+git clone https://github.com/erlancarreira/CodexWeb.git
+cd CodexWeb/runtime/chatgpt-web
 
 bun install --frozen-lockfile
 bun run app
@@ -75,13 +75,13 @@ codex-chatgpt-web tunnel status
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.ps1 | iex
+irm https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.ps1 | iex
 ```
 
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.sh | sh
+curl -fsSL https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.sh | sh
 ```
 
 ## 개발
@@ -89,8 +89,8 @@ curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/mai
 Bun 1.4.2이 필요합니다.
 
 ```bash
-git clone https://github.com/erlancarreira/codex-chatgpt-web.git
-cd codex-chatgpt-web
+git clone https://github.com/erlancarreira/CodexWeb.git
+cd CodexWeb/runtime/chatgpt-web
 
 bun install --frozen-lockfile
 bun run typecheck

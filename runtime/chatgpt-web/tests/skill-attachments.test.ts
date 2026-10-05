@@ -89,6 +89,26 @@ test("skill content counts toward input and final-message budgets, including mul
   }
 });
 
+test("compaction inlines selected skills instead of consuming attachment slots", () => {
+  const compact = parse(Array.from({ length: 11 }, (_, i) => input(text(`skill-${i}`))));
+  compact._compactionRequest = true;
+  const compiled = compileChatGptWebPrompt(compact, capabilities, token, { experimentalSkillAttachments: true });
+  expect(compiled.skillFiles).toBeUndefined();
+  expect(compiled.text).toContain("Read references/checks.md");
+  expect(compiled.text).toContain("skill-10");
+  expect(chatGptPromptFilePayloads(compiled)).toEqual([]);
+});
+
+test("single-message compaction reserves one attachment slot for its context file", () => {
+  const image = { role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,iVBORw==" }] };
+  const compact = parse(Array.from({ length: 10 }, () => image));
+  compact._compactionRequest = true;
+  const compiled = compileChatGptWebPrompt(compact, capabilities, token, { experimentalSkillAttachments: true });
+  expect(compiled.images).toHaveLength(9);
+  expect(compiled.text.match(/older image not attached/g)).toHaveLength(1);
+  expect(chatGptPromptFilePayloads(compiled)).toHaveLength(9);
+});
+
 test("over-limit, malformed and manual requests fail explicitly without silently losing skill content", () => {
   const ten = Array.from({ length: 10 }, (_, i) => input(text(`skill-${i}`)));
   expect(chatGptPromptFilePayloads(compile(ten))).toHaveLength(10);

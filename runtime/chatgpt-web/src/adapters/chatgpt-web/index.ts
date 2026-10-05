@@ -467,12 +467,13 @@ export function createChatGptWebAdapter(
       : undefined;
     const compileOptionsFor = (input: CodexParsedRequest) => {
       if (manualRequest) return {};
+      const useSkillAttachments = experimentalSkillAttachments === true && !input._compactionRequest;
       const experimentalMultipartParts = experimentalBiggerContext
-        ? resolveBiggerContextMultipartParts(input, turnCapabilities, experimentalSkillAttachments)
+        ? resolveBiggerContextMultipartParts(input, turnCapabilities, useSkillAttachments)
         : undefined;
       return {
         captureLunaCheckpoint,
-        experimentalSkillAttachments,
+        experimentalSkillAttachments: useSkillAttachments,
         ...(experimentalMultipartParts !== undefined
           ? { experimentalMultipartParts }
           : {}),

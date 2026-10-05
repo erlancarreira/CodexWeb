@@ -4,7 +4,7 @@
 
 O projeto executa uma bridge Responses local, usa uma sessão autenticada do ChatGPT no navegador incorporado e, no modo **Full Harness**, conecta as ferramentas do task atual por meio de um tunnel MCP.
 
-> **Repositório oficial deste projeto:** `erlancarreira/codex-chatgpt-web`
+> **Repositório oficial deste projeto:** `erlancarreira/CodexWeb`
 
 ## Recursos
 
@@ -28,19 +28,19 @@ O projeto executa uma bridge Responses local, usa uma sessão autenticada do Cha
 Feche qualquer instalação anterior antes de atualizar.
 
 ```powershell
-irm https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.ps1 | iex
+irm https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.ps1 | iex
 ```
 
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.sh | sh
+curl -fsSL https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.sh | sh
 ```
 
 Os instaladores usam as releases publicadas em:
 
 ```text
-https://github.com/erlancarreira/codex-chatgpt-web/releases
+https://github.com/erlancarreira/CodexWeb/releases
 ```
 
 Se ainda não houver um artefato binário publicado para a versão desejada, use a instalação por código-fonte.
@@ -64,8 +64,8 @@ Requisitos:
 - uma conta ChatGPT válida.
 
 ```bash
-git clone https://github.com/erlancarreira/codex-chatgpt-web.git
-cd codex-chatgpt-web
+git clone https://github.com/erlancarreira/CodexWeb.git
+cd CodexWeb/runtime/chatgpt-web
 
 bun install --frozen-lockfile
 bun run app
@@ -387,19 +387,19 @@ http://127.0.0.1:17841/healthz
 Use sempre o canal deste repositório:
 
 ```text
-erlancarreira/codex-chatgpt-web
+erlancarreira/CodexWeb
 ```
 
 Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.ps1 | iex
+irm https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.ps1 | iex
 ```
 
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.sh | sh
+curl -fsSL https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.sh | sh
 ```
 
 A atualização preserva o perfil e as configurações locais conforme o mecanismo do launcher.
@@ -424,8 +424,8 @@ No Windows:
 ## Desenvolvimento
 
 ```bash
-git clone https://github.com/erlancarreira/codex-chatgpt-web.git
-cd codex-chatgpt-web
+git clone https://github.com/erlancarreira/CodexWeb.git
+cd CodexWeb/runtime/chatgpt-web
 
 bun install --frozen-lockfile
 bun run typecheck

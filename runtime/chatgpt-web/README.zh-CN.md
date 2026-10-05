@@ -2,20 +2,20 @@
 
 CodexNative Web 将 ChatGPT Web 模型集成到原生 Codex 工作流，并保留流式输出、上下文、MCP、本地工具和上下文压缩。本项目仅使用 Web 模式，不要求 OpenAI API key。
 
-官方仓库：`erlancarreira/codex-chatgpt-web`
+官方仓库：`erlancarreira/CodexWeb`
 
 ## 快速安装
 
 Windows：
 
 ```powershell
-irm https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.ps1 | iex
+irm https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.ps1 | iex
 ```
 
 macOS / Linux：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.sh | sh
+curl -fsSL https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.sh | sh
 ```
 
 ## 从源代码运行
@@ -23,8 +23,8 @@ curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/mai
 需要 Bun 1.4.2。
 
 ```bash
-git clone https://github.com/erlancarreira/codex-chatgpt-web.git
-cd codex-chatgpt-web
+git clone https://github.com/erlancarreira/CodexWeb.git
+cd CodexWeb/runtime/chatgpt-web
 
 bun install --frozen-lockfile
 bun run app
@@ -75,13 +75,13 @@ codex-chatgpt-web tunnel status
 Windows：
 
 ```powershell
-irm https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.ps1 | iex
+irm https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.ps1 | iex
 ```
 
 macOS / Linux：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/main/scripts/install-launcher.sh | sh
+curl -fsSL https://raw.githubusercontent.com/erlancarreira/CodexWeb/main/runtime/chatgpt-web/scripts/install-launcher.sh | sh
 ```
 
 ## 开发
@@ -89,8 +89,8 @@ curl -fsSL https://raw.githubusercontent.com/erlancarreira/codex-chatgpt-web/mai
 需要 Bun 1.4.2。
 
 ```bash
-git clone https://github.com/erlancarreira/codex-chatgpt-web.git
-cd codex-chatgpt-web
+git clone https://github.com/erlancarreira/CodexWeb.git
+cd CodexWeb/runtime/chatgpt-web
 
 bun install --frozen-lockfile
 bun run typecheck

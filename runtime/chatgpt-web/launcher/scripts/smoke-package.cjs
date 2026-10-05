@@ -101,7 +101,7 @@ try {
     args = ["-a", executable, "--launcher-smoke-test"];
     env.APPIMAGE_EXTRACT_AND_RUN = "1";
   } else if (process.platform === "win32") {
-    const installer = artifact(/-win-x64\.exe$/, "Windows installer");
+    const installer = artifact(/CodexWeb-Setup-.*-x64\.exe$/, "Windows installer");
     run(installer, ["/S", "/currentuser"], { timeout: 300_000 });
     executable = path.join(windowsInstallLocation(), `${launcherManifest.build.productName}.exe`);
     command = executable;

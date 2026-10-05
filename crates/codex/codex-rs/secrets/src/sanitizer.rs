@@ -49,7 +49,7 @@ mod tests {
                 "Bearer [REDACTED_SECRET]",
             ),
             (
-                "Bearer AKIAABCDEFGHIJKLMNOP/~secret_suffix",
+                concat!("Bearer AKIA", "ABCDEFGHIJKLMNOP/~secret_suffix"),
                 "Bearer [REDACTED_SECRET]",
             ),
             (

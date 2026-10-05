@@ -1,0 +1,118 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_DEBUG: "none"
+      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content runtime/chatgpt-web/package.json -Raw | ConvertFrom-Json).version
+          $launcherVersion = (Get-Content runtime/chatgpt-web/launcher/package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne $launcherVersion) { throw "Runtime and launcher versions differ" }
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") { throw "Tag does not match package version" }
+          "CODEXWEB_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Verify SQL migration line endings
+        shell: pwsh
+        working-directory: crates/codex/codex-rs
+        run: |
+          $bad = @()
+          foreach ($file in Get-ChildItem state -Recurse -Filter *.sql) {
+            if ([IO.File]::ReadAllBytes($file.FullName) -contains 13) { $bad += $file.FullName }
+          }
+          if ($bad.Count -gt 0) { $bad | ForEach-Object { Write-Error "CRLF migration detected: $_" }; exit 1 }
+          $hash = (Get-FileHash state/migrations/0001_threads.sql -Algorithm SHA384).Hash
+          if ($hash -ne "627EF19164C9BB298A0CD99945981C9B7BDA3D9E6CF12EB35145E3B1D3BF7CF8740F0DBAA0B475185FC2993397078049") { throw "Unexpected migration checksum" }
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: crates/codex/codex-rs -> target
+          cache-on-failure: true
+
+      - name: Build patched CodexNative
+        shell: pwsh
+        working-directory: crates/codex/codex-rs
+        run: |
+          $build = Start-Process cargo -ArgumentList @('build','-p','codex-cli','--bin','codex','--release') -NoNewWindow -PassThru
+          while (-not $build.HasExited) {
+            Write-Host ("[{0}] cargo build active (PID {1})" -f (Get-Date -Format 'u'), $build.Id)
+            Start-Sleep -Seconds 120
+            $build.Refresh()
+          }
+          if ($build.ExitCode -ne 0) { exit $build.ExitCode }
+          Get-FileHash target/release/codex.exe -Algorithm SHA256
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install runtime dependencies
+        shell: pwsh
+        working-directory: runtime/chatgpt-web
+        run: |
+          bun install --frozen-lockfile
+          Push-Location launcher
+          bun install --frozen-lockfile
+          Pop-Location
+
+      - name: Validate runtime and packaging contracts
+        shell: pwsh
+        working-directory: runtime/chatgpt-web
+        run: |
+          bun run typecheck
+          bun test launcher/tests/packaging-contract.test.cjs launcher/tests/update.test.cjs launcher/tests/renderer-wiring.test.cjs
+
+      - name: Stage unified Windows payload
+        shell: pwsh
+        run: ./scripts/stage-windows-release.ps1 -NativeBinary "$PWD/crates/codex/codex-rs/target/release/codex.exe"
+
+      - name: Package Codex Web
+        shell: pwsh
+        working-directory: runtime/chatgpt-web
+        run: bun run app:package
+
+      - name: Create SHA-256 manifest
+        shell: pwsh
+        run: |
+          $artifact = Get-ChildItem runtime/chatgpt-web/launcher/artifacts -Filter "CodexWeb-Setup-*.exe" | Select-Object -First 1
+          if (-not $artifact) { throw "Installer artifact missing" }
+          $hash = (Get-FileHash $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($artifact.Name)" | Set-Content checksums.txt -Encoding ascii
+          Get-Content checksums.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CodexWeb-Windows-${{ env.CODEXWEB_VERSION }}
+          path: |
+            runtime/chatgpt-web/launcher/artifacts/CodexWeb-Setup-*.exe
+            checksums.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = (Get-ChildItem runtime/chatgpt-web/launcher/artifacts -Filter "CodexWeb-Setup-*.exe" | Select-Object -First 1).FullName
+          $notes = "Codex Web $env:CODEXWEB_VERSION - Windows x64 unified installer. Official OpenAI Codex Windows app required and detected locally. Default: GPT-5.6 Sol (Web) - Alto."
+          gh release create "$env:GITHUB_REF_NAME" "$installer" checksums.txt --repo "$env:GITHUB_REPOSITORY" --title "Codex Web $env:CODEXWEB_VERSION" --notes "$notes" --latest

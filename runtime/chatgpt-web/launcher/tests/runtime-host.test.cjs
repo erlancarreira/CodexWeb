@@ -452,7 +452,37 @@ test("launcher update preserves Zero Risk and never probes its account capabilit
   assert.equal(fixture.invocation().args.includes("--refresh-account-capabilities"), false);
 });
 
-test("launcher update transaction leaves current and externally owned runtimes unchanged", async () => {
+test("launcher update transaction adopts the trusted 6.2.0 terminal-managed runtime", async () => {
+  const legacy = hostFor({
+    version: 3,
+    mode: "full",
+    browserHost: "managed-chrome",
+    browserInteractionMode: "automatic",
+    appName: "Codex Native2",
+    releaseVersion: "6.2.0",
+  });
+
+  const result = await legacy.host.upgradeManagedRuntime();
+
+  assert.deepEqual(legacy.invocation().args, [
+    "setup",
+    "--full",
+    "--browser-host-descriptor",
+    "/runtime/launcher-browser.json",
+    "--automatic-browser-interaction",
+    "--refresh-account-capabilities",
+    "--replace-codex-route",
+    "--acknowledge-unofficial",
+    "--restart-service",
+  ]);
+  assert.equal(result.updated, true);
+  assert.equal(result.externalMigrated, true);
+  assert.equal(result.mode, "full");
+  assert.equal(result.fromVersion, "6.2.0");
+  assert.equal(result.toVersion, "1.1.3");
+});
+
+test("launcher update transaction leaves current and untrusted externally owned runtimes unchanged", async () => {
   const current = hostFor({ mode: "browser-only", browserHost: "launcher", releaseVersion: "1.1.3" });
   const currentFull = hostFor({
     mode: "full",
