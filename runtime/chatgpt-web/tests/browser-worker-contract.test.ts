@@ -1383,7 +1383,7 @@ test("prompt readback preserves rendered line breaks from contenteditable compos
   const start = workerSource.indexOf("private async attachedPromptText");
   const end = workerSource.indexOf("private async assertPromptAttached", start);
   const source = workerSource.slice(start, end);
-  expect(source).toContain('element.innerText ?? element.textContent ?? ""');
+  expect(source).toContain('element instanceof HTMLElement ? element.innerText : element.textContent');
   expect(source).not.toContain('return (element.textContent ?? "").trimStart()');
 });
 test("prompt verification accepts safe Lexical text normalization without weakening other mismatches", async () => {
@@ -1410,11 +1410,20 @@ test("prompt verification accepts safe Lexical text normalization without weaken
   expect(promptTextEquivalent.call(worker, "a b", "a\u00A0b")).toBeFalse();
   expect(promptTextEquivalent.call(worker, "a\u00A0b", "a b")).toBeFalse();
 
-  // Windows CRLF is normalized by contenteditable/Lexical to LF without losing content.
+  // Browser DOM readback may expose rendered newlines as LF or CRLF.
   expect(promptTextEquivalent.call(worker, "a\r\nb\r\nc", "a\nb\nc")).toBeTrue();
-  expect(promptTextEquivalent.call(worker, "a\nb", "a\r\nb")).toBeFalse();
+  expect(promptTextEquivalent.call(worker, "a\nb\nc", "a\r\nb\r\nc")).toBeTrue();
   expect(promptTextEquivalent.call(worker, "a\rb", "a\nb")).toBeFalse();
+  expect(promptTextEquivalent.call(worker, "a\nb", "a\rb")).toBeFalse();
 
+  const largePrefix = "x".repeat(24);
+  const largeMiddle = Array.from({ length: 37 }, (_, index) => `line-${index}`).join("\n");
+  const largeSeed = `${largePrefix}\n${largeMiddle}`;
+  const largeExpected = largeSeed + "z".repeat(158445 - largeSeed.length);
+  const largeObserved = largeExpected.replace(/\n/g, "\r\n");
+  expect(largeExpected).toHaveLength(158445);
+  expect(largeObserved).toHaveLength(158482);
+  expect(promptTextEquivalent.call(worker, largeExpected, largeObserved)).toBeTrue();
   // Other whitespace and same-length text mutations must remain fail closed.
   expect(promptTextEquivalent.call(worker, "a b", "a\tb")).toBeFalse();
   expect(promptTextEquivalent.call(worker, "a\nb", "a b")).toBeFalse();

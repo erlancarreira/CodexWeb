@@ -2890,64 +2890,64 @@ export class ChatGptBrowserWorker {
     return expected[expectedIndex - 1] === " " || expected[expectedIndex + 1] === " ";
   }
 
+  private normalizePromptLineEndings(value: string): string | undefined {
+    if (!value.includes("\r")) return value;
+
+    let normalized = "";
+    for (let index = 0; index < value.length; index += 1) {
+      const unit = value[index];
+      if (unit !== "\r") {
+        normalized += unit;
+        continue;
+      }
+
+      // A rendered browser line break may be surfaced as LF or CRLF depending on
+      // the DOM API/browser build. Accept CR only when it is part of CRLF.
+      if (value[index + 1] !== "\n") return undefined;
+      normalized += "\n";
+      index += 1;
+    }
+
+    return normalized;
+  }
+
   private promptTextEquivalent(
     expected: string,
     observed: string,
   ): boolean {
-    let expectedIndex = 0;
-    let observedIndex = 0;
+    const normalizedExpected = this.normalizePromptLineEndings(expected);
+    const normalizedObserved = this.normalizePromptLineEndings(observed);
+    if (normalizedExpected === undefined || normalizedObserved === undefined) return false;
+    if (normalizedExpected.length !== normalizedObserved.length) return false;
 
-    while (expectedIndex < expected.length && observedIndex < observed.length) {
-      // Lexical/contenteditable normalizes Windows CRLF inserted as plain text to LF.
-      // Accept only that directional representation change; every other mutation fails closed.
-      if (
-        expected[expectedIndex] === "\r"
-        && expected[expectedIndex + 1] === "\n"
-        && observed[observedIndex] === "\n"
-      ) {
-        expectedIndex += 2;
-        observedIndex += 1;
-        continue;
-      }
-
-      if (!this.promptCodeUnitEquivalent(expected, observed, expectedIndex, observedIndex)) {
+    for (let index = 0; index < normalizedExpected.length; index += 1) {
+      if (!this.promptCodeUnitEquivalent(normalizedExpected, normalizedObserved, index)) {
         return false;
       }
-      expectedIndex += 1;
-      observedIndex += 1;
     }
 
-    return expectedIndex === expected.length && observedIndex === observed.length;
+    return true;
   }
 
   private promptEquivalentPrefixLength(
     expected: string,
     observed: string,
   ): number {
-    let expectedIndex = 0;
-    let observedIndex = 0;
+    const normalizedExpected = this.normalizePromptLineEndings(expected);
+    const normalizedObserved = this.normalizePromptLineEndings(observed);
+    if (normalizedExpected === undefined || normalizedObserved === undefined) return 0;
 
-    while (expectedIndex < expected.length && observedIndex < observed.length) {
-      if (
-        expected[expectedIndex] === "\r"
-        && expected[expectedIndex + 1] === "\n"
-        && observed[observedIndex] === "\n"
-      ) {
-        expectedIndex += 2;
-        observedIndex += 1;
-        continue;
-      }
-
-      if (!this.promptCodeUnitEquivalent(expected, observed, expectedIndex, observedIndex)) {
-        break;
-      }
-      expectedIndex += 1;
-      observedIndex += 1;
+    const length = Math.min(normalizedExpected.length, normalizedObserved.length);
+    let index = 0;
+    while (
+      index < length
+      && this.promptCodeUnitEquivalent(normalizedExpected, normalizedObserved, index)
+    ) {
+      index += 1;
     }
 
-    return expectedIndex;
+    return index;
   }
-
   run(turn: BrowserTurn): Promise<string> {
     if (this.activeRuns.has(turn.traceId)) {
       return Promise.reject(new Error(`Duplicate ChatGPT web browser turn: ${turn.traceId}`));
@@ -4124,7 +4124,10 @@ export class ChatGptBrowserWorker {
         return element.value.trimStart();
       }
       const connectorSelector = '[data-id^="plugin:"][data-keyword], [data-inline-selection-pill-cursor-target], [app-mention-path^="app://"][app-mention-display-name][contenteditable="false"]';
-      if (!element.querySelector(connectorSelector)) return (element.innerText ?? element.textContent ?? "").trimStart();
+      if (!element.querySelector(connectorSelector)) {
+        const renderedText = element instanceof HTMLElement ? element.innerText : element.textContent;
+        return (renderedText ?? "").trimStart();
+      }
       const clone = element.cloneNode(true) as HTMLElement;
       clone.querySelectorAll(connectorSelector).forEach(part => part.remove());
       return [...clone.childNodes]
