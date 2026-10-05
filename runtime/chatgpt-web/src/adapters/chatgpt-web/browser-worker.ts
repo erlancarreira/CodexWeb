@@ -1952,7 +1952,7 @@ export function chatGptTransportProvesCompactionCompletion(
     && state.externalToolCallsInFlight !== true;
 }
 
-export type ChatGptSubmissionEvidence = "user_turn" | "assistant_turn" | "generation_running" | "mcp_tool_call";
+export type ChatGptSubmissionEvidence = "user_turn" | "assistant_turn" | "mcp_tool_call";
 
 export function chatGptSubmissionEvidence(state: {
   initialTurnIdentities: readonly string[];
@@ -1962,7 +1962,6 @@ export function chatGptSubmissionEvidence(state: {
 }): ChatGptSubmissionEvidence | undefined {
   if (chatGptNewTurnIdentity(state.initialTurnIdentities, state.userIdentities)) return "user_turn";
   if (chatGptNewTurnIdentity(state.initialTurnIdentities, state.responseIdentities)) return "assistant_turn";
-  if (state.generationRunning) return "generation_running";
   return undefined;
 }
 
@@ -3933,6 +3932,21 @@ export class ChatGptBrowserWorker {
         );
       } catch (error) {
         const latestProgress = externalProgress?.snapshot();
+        const observationNow = Date.now();
+        const externalProgressLive = chatGptExternalProgressIsLive(latestProgress, observationNow, graceMs);
+        const networkProgressLive = networkProgress?.networkIsLive(observationNow, graceMs) ?? false;
+        if (error instanceof ChatGptBrowserObservationTimeoutError
+          && (externalProgressLive || networkProgressLive)) {
+          await this.waitForTurnDomOrExternalProgress(
+            observationPage,
+            latestProgress?.revision ?? 0,
+            externalProgress,
+            signal,
+            networkProgress,
+            networkAtLoopStart?.revision ?? 0,
+          );
+          continue;
+        }
         if (error instanceof ChatGptBrowserObservationTimeoutError && recoverObservation) {
           let recoveryAttempt: number;
           try {
@@ -3954,7 +3968,7 @@ export class ChatGptBrowserWorker {
           observationBaseline = recovered.baseline;
           continue;
         }
-        if (!chatGptExternalProgressIsLive(latestProgress, Date.now(), graceMs)) throw error;
+        if (!externalProgressLive && !networkProgressLive) throw error;
         await this.waitForTurnDomOrExternalProgress(
           observationPage,
           latestProgress?.revision ?? 0,
@@ -6135,7 +6149,7 @@ export class ChatGptBrowserWorker {
                 );
                 if (externalProgressLive || networkProgressLive) {
                   console.info(
-                    [chatgpt-web] browser turn  skipped response-page resync because transport is already live,
+                    `[chatgpt-web] browser turn ${turn.traceId} skipped response-page resync because transport is already live`,
                   );
                   return;
                 }
