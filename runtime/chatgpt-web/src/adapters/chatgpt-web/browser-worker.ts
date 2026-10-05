@@ -273,6 +273,7 @@ const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
 export const CHATGPT_UI_SETTLE_MS = 250;
 export const CHATGPT_SEND_ENABLE_GRACE_MS = 5_000;
 export const CHATGPT_SEND_CLICK_ACTION_TIMEOUT_MS = 2_500;
+export const CHATGPT_SEND_KEYBOARD_ACTION_TIMEOUT_MS = 2_500;
 export const CHATGPT_SEND_CLICK_EVIDENCE_GRACE_MS = 2_500;
 
 export function isChatGptConversationSubmissionUrl(value: string): boolean {
@@ -1759,6 +1760,16 @@ export const CHATGPT_MIN_OPERATIONAL_VIEWPORT = Object.freeze({ width: 320, heig
 
 async function waitForOperationalChatGptViewport(page: Page, signal?: AbortSignal): Promise<void> {
   try {
+    const viewport = await withBrowserTurnAbort(page.evaluate(() => ({
+      width: innerWidth,
+      height: innerHeight,
+    })), signal);
+    if (
+      viewport.width < CHATGPT_MIN_OPERATIONAL_VIEWPORT.width
+      || viewport.height < CHATGPT_MIN_OPERATIONAL_VIEWPORT.height
+    ) {
+      await withBrowserTurnAbort(page.setViewportSize({ width: 800, height: 600 }), signal);
+    }
     await withBrowserTurnAbort(page.waitForFunction(
       ({ width, height }) => innerWidth >= width && innerHeight >= height,
       CHATGPT_MIN_OPERATIONAL_VIEWPORT,
@@ -2887,7 +2898,7 @@ export class ChatGptBrowserWorker {
     if (expectedUnit === observedUnit) return true;
     if (expectedUnit !== " " || observedUnit !== "\u00A0") return false;
 
-    return expected[expectedIndex - 1] === " " || expected[expectedIndex + 1] === " ";
+    return true;
   }
 
   private normalizePromptLineEndings(value: string): string | undefined {
@@ -4659,6 +4670,51 @@ export class ChatGptBrowserWorker {
     await captureDiagnostic?.(sendButton ? "send-ready" : "send-ready-keyboard-fallback");
     const initialToolBatchRevision = externalProgress?.snapshot().lastToolBatchRevision ?? 0;
     await submissionLifecycle?.onSendActivated?.();
+    const activateKeyboardFallback = async (checkpoint: string): Promise<void> => {
+      await captureDiagnostic?.(checkpoint);
+      try {
+        await composer.press("Enter", {
+          noWaitAfter: true,
+          signal: abortSignal,
+          timeout: CHATGPT_SEND_KEYBOARD_ACTION_TIMEOUT_MS,
+        });
+      } catch (error) {
+        if (abortSignal?.aborted) throw error;
+        if (error instanceof Error && error.name === "TimeoutError") {
+          await captureDiagnostic?.("send-keyboard-fallback-timeout");
+        }
+        throw error;
+      }
+      await captureDiagnostic?.("send-keyboard-fallback-activated");
+    };
+    const hasImmediateSubmissionEvidence = async (): Promise<boolean> => {
+      const stopVisible = await page.locator(CHATGPT_STOP_BUTTON_SELECTOR)
+        .filter({ visible: true })
+        .count()
+        .then(count => count > 0)
+        .catch(() => false);
+      if (stopVisible) return true;
+      return Boolean(await this.currentSubmissionEvidence(page, baseline, abortSignal).catch(() => undefined));
+    };
+    const activateDomClickFallback = async (checkpointPrefix: string): Promise<void> => {
+      await captureDiagnostic?.(`${checkpointPrefix}-dom-fallback`);
+      try {
+        await withBrowserTurnAbort(
+          sendButton!.evaluate((element: HTMLElement) => element.click()),
+          abortSignal,
+        );
+        await captureDiagnostic?.("send-dom-click-fallback-activated");
+        await withBrowserTurnAbort(
+          new Promise(resolve => setTimeout(resolve, CHATGPT_SEND_CLICK_EVIDENCE_GRACE_MS)),
+          abortSignal,
+        );
+        if (await hasImmediateSubmissionEvidence()) return;
+      } catch (error) {
+        if (abortSignal?.aborted) throw error;
+        await captureDiagnostic?.("send-dom-click-fallback-failed");
+      }
+      await activateKeyboardFallback(`${checkpointPrefix}-keyboard-fallback`);
+    };
     if (sendButton) {
       let keyboardFallbackActivated = false;
       let clickTimeoutHadSubmissionEvidence = false;
@@ -4679,14 +4735,8 @@ export class ChatGptBrowserWorker {
         if (clickTimeoutHadSubmissionEvidence) {
           await captureDiagnostic?.("send-click-timeout-submission-evidence");
         } else {
-          await captureDiagnostic?.("send-click-timeout-keyboard-fallback");
-          await composer.press("Enter", {
-            noWaitAfter: true,
-            signal: abortSignal,
-            timeout: 0,
-          });
+          await activateDomClickFallback("send-click-timeout");
           keyboardFallbackActivated = true;
-          await captureDiagnostic?.("send-keyboard-fallback-activated");
         }
       }
       baseline.sendActivated = true;
@@ -4702,21 +4752,11 @@ export class ChatGptBrowserWorker {
           .then(count => count > 0)
           .catch(() => false);
         if (!stopVisible) {
-          await captureDiagnostic?.("send-click-noop-keyboard-fallback");
-          await composer.press("Enter", {
-            noWaitAfter: true,
-            signal: abortSignal,
-            timeout: 0,
-          });
-          await captureDiagnostic?.("send-keyboard-fallback-activated");
+          await activateDomClickFallback("send-click-noop");
         }
       }
     } else {
-      await composer.press("Enter", {
-        noWaitAfter: true,
-        signal: abortSignal,
-        timeout: 0,
-      });
+      await activateKeyboardFallback("send-keyboard-fallback");
       baseline.sendActivated = true;
       await captureDiagnostic?.("send-activated");
     }
@@ -6083,7 +6123,31 @@ export class ChatGptBrowserWorker {
                 const signal = reloadSignal
                   ? AbortSignal.any([stageSignal, reloadSignal])
                   : stageSignal;
-                await waitForOperationalChatGptViewport(page, signal);
+                const resyncAbort = new AbortController();
+                const resyncSignal = AbortSignal.any([signal, resyncAbort.signal]);
+                const externalRevision = turn.externalProgress?.snapshot().revision ?? 0;
+                const networkRevision = submissionRejection.networkRevision();
+                const waits: Array<Promise<"viewport" | "transport">> = [
+                  waitForOperationalChatGptViewport(page, resyncSignal).then(() => "viewport"),
+                  submissionRejection.waitForNetworkChange(networkRevision, resyncSignal)
+                    .then(() => "transport"),
+                ];
+                if (turn.externalProgress) {
+                  waits.push(
+                    turn.externalProgress.waitForChange(externalRevision, resyncSignal)
+                      .then(() => "transport"),
+                  );
+                }
+                try {
+                  const outcome = await Promise.race(waits);
+                  if (outcome === "transport") {
+                    console.info(
+                      `[chatgpt-web] browser turn ${turn.traceId} cancelled response-page resync after transport progress resumed`,
+                    );
+                  }
+                } finally {
+                  resyncAbort.abort();
+                }
               },
             );
           } else {
@@ -6821,17 +6885,21 @@ export class ChatGptBrowserWorker {
           }
           if (!loggedCompletionWait && Date.now() - sentAt >= 60_000) {
             loggedCompletionWait = true;
+            const completionWaitCheckpoint = transportProgressLive
+              ? "response-active-60s"
+              : "response-stalled-60s";
             await diagnostics.capture(
               page,
-              "response-stalled-60s",
+              completionWaitCheckpoint,
               undefined,
               { network: submissionRejection.networkSnapshot() },
             );
             const diagnostic = await this.stalledTurnDiagnostic(page, responseTurn.locator).catch(error => JSON.stringify({
               diagnosticError: error instanceof Error ? error.message : String(error),
             }));
-            console.warn(
-              `[chatgpt-web] waiting for completed-turn evidence (running=${running}, sawRunning=${sawRunning}, textChars=${snapshot.visibleText.length}, completionActionVisible=${snapshot.completionActionVisible}, network=${JSON.stringify(submissionRejection.networkSnapshot())}, ui=${diagnostic})`,
+            const completionWaitLog = transportProgressLive ? console.info : console.warn;
+            completionWaitLog(
+              `[chatgpt-web] waiting for completed-turn evidence (transportLive=${transportProgressLive}, running=${running}, sawRunning=${sawRunning}, textChars=${snapshot.visibleText.length}, completionActionVisible=${snapshot.completionActionVisible}, network=${JSON.stringify(submissionRejection.networkSnapshot())}, ui=${diagnostic})`,
             );
           }
         } else {

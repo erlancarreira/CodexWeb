@@ -120,11 +120,25 @@ if ([string]$runtimeConfig.mode -eq 'full') {
   $tunnelProfileDir = [string]$runtimeConfig.tunnel.profileDir
   $tunnelProfileName = [string]$runtimeConfig.tunnel.profileName
   if (!(Test-Path $tunnelExe)) { throw "Codex Web tunnel binary not found: $tunnelExe" }
-  $tunnelProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.ExecutablePath -eq $tunnelExe } |
-    Select-Object -First 1
-  if (-not $tunnelProcess) {
-    Start-Process -FilePath $tunnelExe -ArgumentList @('run','--profile-dir',$tunnelProfileDir,'--profile',$tunnelProfileName) -WindowStyle Hidden | Out-Null
+  $tunnelMutex = New-Object System.Threading.Mutex($false, 'Local\CodexWebTunnelBootstrap')
+  $tunnelMutexAcquired = $false
+  try {
+    try {
+      $tunnelMutexAcquired = $tunnelMutex.WaitOne([TimeSpan]::FromSeconds(15))
+    } catch [System.Threading.AbandonedMutexException] {
+      $tunnelMutexAcquired = $true
+    }
+    if (-not $tunnelMutexAcquired) { throw 'Timed out waiting for the Codex Web tunnel bootstrap lock.' }
+
+    $tunnelProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object { $_.ExecutablePath -eq $tunnelExe } |
+      Select-Object -First 1
+    if (-not $tunnelProcess) {
+      Start-Process -FilePath $tunnelExe -ArgumentList @('run','--profile-dir',$tunnelProfileDir,'--profile',$tunnelProfileName) -WindowStyle Hidden | Out-Null
+    }
+  } finally {
+    if ($tunnelMutexAcquired) { $tunnelMutex.ReleaseMutex() | Out-Null }
+    $tunnelMutex.Dispose()
   }
 
   $tunnelAlias = if ($runtimeConfig.tunnel.alias) { [string]$runtimeConfig.tunnel.alias } else { 'codex-chatgpt-web' }

@@ -75,7 +75,7 @@ interface TurnChannel {
   compactionDeliveryCount: number;
   safe?: SafeTurnControl;
   /** Every MCP request owns a lease from token claim until its handler has settled. */
-  activities: Set<string>;
+  activities: Map<string, number>;
   /** Prevents a lost/retried or delayed claim from resurrecting activity after cleanup. */
   completedActivities: Set<string>;
   /** Monotonic across activity start/end so a completed request cannot disappear across a fence. */
@@ -142,6 +142,7 @@ interface BrokerResponse {
 const brokers = new Map<string, TurnBroker>();
 const MAX_BROKER_LINE_CHARS = 67_108_864;
 const MAX_RETIRED_TURN_HANDLES = 64;
+export const TURN_BROKER_ACTIVITY_LEASE_MS = 120_000;
 
 export async function closeTurnBrokers(): Promise<void> {
   const active = [...brokers.values()];
@@ -265,6 +266,24 @@ export class TurnBroker implements TurnBrokerOwner {
 
   private constructor(readonly socketPath: string) {}
 
+  private reapStaleActivities(channel: TurnChannel, now = Date.now()): number {
+    if (channel.activities.size === 0 || channel.invocations.size > 0) return 0;
+    let reaped = 0;
+    for (const [activityId, startedAt] of channel.activities) {
+      if (now - startedAt < TURN_BROKER_ACTIVITY_LEASE_MS) continue;
+      channel.activities.delete(activityId);
+      channel.completedActivities.add(activityId);
+      channel.activityRevision += 1;
+      reaped += 1;
+    }
+    if (reaped > 0) {
+      console.warn(
+        `[chatgpt-web] broker trace=${channel.traceId} reaped ${reaped} stale MCP activity lease(s) before terminal completion`,
+      );
+    }
+    return reaped;
+  }
+
   /**
    * A ChatGPT turn outlives the request that started it, and its Codex Native calls arrive from a
    * separate MCP process. Creating the socket only once a turn registers leaves that process
@@ -304,7 +323,7 @@ export class TurnBroker implements TurnBrokerOwner {
       waiters: new Set(),
       compactionRequested: false,
       compactionDeliveryCount: 0,
-      activities: new Set(),
+      activities: new Map(),
       completedActivities: new Set(),
       activityRevision: 0,
       completionCommitted: false,
@@ -446,6 +465,7 @@ export class TurnBroker implements TurnBrokerOwner {
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
     if (channel.completionCommitted) return channel.completionRevision;
+    this.reapStaleActivities(channel);
     if (channel.activities.size > 0 || channel.invocations.size > 0) return undefined;
     return channel.activityRevision;
   }
@@ -457,6 +477,7 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
+    this.reapStaleActivities(channel);
     if (channel.completionCommitted) return channel.completionRevision === revision;
     if (channel.activityRevision !== revision
       || channel.activities.size > 0
@@ -568,6 +589,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (channel.invocations.size > 0) {
       throw new Error(`Zero Risk turn cannot complete with ${channel.invocations.size} pending Codex tool invocation(s)`);
     }
+    this.reapStaleActivities(channel);
     if (channel.activities.size > 0) {
       throw new Error(`Zero Risk turn cannot complete with ${channel.activities.size} active Codex MCP request(s)`);
     }
@@ -1069,7 +1091,7 @@ export class TurnBroker implements TurnBrokerOwner {
         throw new Error("turn activity was already completed before this claim settled");
       }
       if (!activeChannel.activities.has(activityId)) {
-        activeChannel.activities.add(activityId);
+        activeChannel.activities.set(activityId, Date.now());
         activeChannel.activityRevision += 1;
       }
       if (activeChannel.bindingId) {

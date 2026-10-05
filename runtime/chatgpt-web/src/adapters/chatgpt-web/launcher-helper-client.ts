@@ -459,7 +459,18 @@ export class LauncherBrowserHelperClient {
     const pending = this.pending.get(message.id);
     if (!pending) return;
     if (message.type === "event") {
-      if (message.event === "heartbeat") pending.turn.onHeartbeat?.();
+      if (message.event === "heartbeat") {
+        pending.turn.onHeartbeat?.();
+        const progress = pending.turn.externalProgress;
+        if (progress && this.helperFeatures.has("progress")) {
+          void this.send({ type: "progress", id: message.id, snapshot: progress.snapshot() })
+            .catch(error => this.abortWithLocalFailure(
+              message.id,
+              error instanceof Error ? error : new Error(String(error)),
+              pending,
+            ));
+        }
+      }
       else if (message.event === "lifecycle") {
         const lifecycle = pending.turn.lifecycle;
         if (!lifecycle) {

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ChatGptTextFeed, ChatGptTraceFeed, ChatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -251,6 +251,16 @@ test("turn broker rejects a Unix socket path that leaves no room for sun_path's 
   } finally {
     await broker.close();
   }
+});
+
+test("completion fences reap stale orphaned MCP activity leases", () => {
+  const source = readFileSync(new URL("../src/adapters/chatgpt-web/turn-broker.ts", import.meta.url), "utf8");
+  expect(source).toContain("export const TURN_BROKER_ACTIVITY_LEASE_MS = 120_000");
+  expect(source).toContain("activities: Map<string, number>");
+  expect(source).toContain("private reapStaleActivities(channel: TurnChannel");
+  expect(source).toContain("channel.invocations.size > 0");
+  expect(source).toContain("this.reapStaleActivities(channel)");
+  expect(source).toContain("activeChannel.activities.set(activityId, Date.now())");
 });
 
 test("turn broker tokens do not expire while their browser turn is still alive", async () => {

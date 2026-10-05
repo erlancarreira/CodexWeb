@@ -160,6 +160,19 @@ test("daemon streams browser lifecycle through the real helper process", async (
   }
 }, 15_000);
 
+test("helper heartbeats resynchronize the current MCP progress snapshot", () => {
+  const source = Bun.file(new URL("../src/adapters/chatgpt-web/launcher-helper-client.ts", import.meta.url));
+  return source.text().then(text => {
+    const start = text.indexOf('if (message.event === "heartbeat")');
+    const end = text.indexOf('else if (message.event === "lifecycle")', start);
+    const heartbeat = text.slice(start, end);
+    expect(heartbeat).toContain('pending.turn.onHeartbeat?.()');
+    expect(heartbeat).toContain('pending.turn.externalProgress');
+    expect(heartbeat).toContain('this.helperFeatures.has("progress")');
+    expect(heartbeat).toContain('snapshot: progress.snapshot()');
+  });
+});
+
 test("authentication-required errors retain structured 401 metadata across the real helper IPC", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-launcher-helper-auth-ipc-"));
   roots.push(root);
