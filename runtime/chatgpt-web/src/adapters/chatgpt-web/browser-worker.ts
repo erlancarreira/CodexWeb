@@ -6123,6 +6123,22 @@ export class ChatGptBrowserWorker {
                 const signal = reloadSignal
                   ? AbortSignal.any([stageSignal, reloadSignal])
                   : stageSignal;
+                const resyncNow = Date.now();
+                const externalProgressLive = chatGptExternalProgressIsLive(
+                  turn.externalProgress?.snapshot(),
+                  resyncNow,
+                  CHATGPT_RESPONSE_DOM_GRACE_MS,
+                );
+                const networkProgressLive = submissionRejection.networkIsLive(
+                  resyncNow,
+                  CHATGPT_RESPONSE_DOM_GRACE_MS,
+                );
+                if (externalProgressLive || networkProgressLive) {
+                  console.info(
+                    [chatgpt-web] browser turn  skipped response-page resync because transport is already live,
+                  );
+                  return;
+                }
                 const resyncAbort = new AbortController();
                 const resyncSignal = AbortSignal.any([signal, resyncAbort.signal]);
                 const externalRevision = turn.externalProgress?.snapshot().revision ?? 0;

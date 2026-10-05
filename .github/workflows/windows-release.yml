@@ -89,6 +89,7 @@ jobs:
         run: |
           bun run typecheck
           bun test tests/browser-worker-contract.test.ts --timeout 15000
+          bun test tests/chatgpt-web-harness.test.ts --timeout 15000
           bun test tests/launcher-helper-client.test.ts tests/turn-broker-lifecycle.test.ts --timeout 15000
           bun test launcher/tests/packaging-contract.test.cjs launcher/tests/update.test.cjs launcher/tests/renderer-wiring.test.cjs
 

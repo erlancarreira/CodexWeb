@@ -19,8 +19,8 @@ import {
 } from "../src/adapters/chatgpt-web/native-compaction-control";
 import { chatGptReadOnlyContextWarning, compileChatGptWebPrompt, withoutSupersededModelSwitchContracts } from "../src/adapters/chatgpt-web/prompt";
 import { MAX_CHATGPT_WEB_TURN_RETRIES } from "../src/adapters/chatgpt-web/retry-policy";
-import { ChatGptTextFeed, ChatGptTraceFeed, ChatGptTurnSessions, chatGptCompactionSourceExecutionKey, chatGptInstructionLineage, chatGptThreadOwnershipKey, chatGptTurnExecutionKey, chatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
-import { callTurnBroker, TurnBroker, type BrokerToolResult } from "../src/adapters/chatgpt-web/turn-broker";
+import { ChatGptTextFeed, ChatGptTraceFeed, ChatGptTurnSession, ChatGptTurnSessions, chatGptCompactionSourceExecutionKey, chatGptInstructionLineage, chatGptThreadOwnershipKey, chatGptTurnExecutionKey, chatGptTurnSessions } from "../src/adapters/chatgpt-web/turn-execution";
+import { callTurnBroker, TURN_BROKER_ACTIVITY_LEASE_MS, TurnBroker, type BrokerToolResult } from "../src/adapters/chatgpt-web/turn-broker";
 import { ChatGptExternalTurnProgress, ChatGptMirroredTurnProgress, chatGptExternalProgressIsLive, chatGptExternalToolCallsAreInFlight } from "../src/adapters/chatgpt-web/turn-progress";
 import { CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS, chatGptMcpInvocationTimeout } from "../src/adapters/chatgpt-web/mcp-server";
 import { defaultBrokerEndpoint } from "../src/config";
@@ -902,6 +902,42 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(starts).toBe(1);
     first.setOutstanding([{ callId: "call_1", wireName: "exec_command", freeform: false, arguments: { cmd: "pwd" } }]);
     expect(second.outstanding()).toEqual([{ callId: "call_1", wireName: "exec_command", freeform: false, arguments: { cmd: "pwd" } }]);
+  });
+
+  test("keeps the tool capability alive after physical settlement until the outstanding result arrives", async () => {
+    let settlePhysical!: () => void;
+    const physicalSettlement = new Promise<void>(resolve => { settlePhysical = resolve; });
+    let retirements = 0;
+    const session = new ChatGptTurnSession({
+      mode: "tools",
+      token: Promise.resolve("tool-token"),
+      externalProgress: new ChatGptExternalTurnProgress(),
+      browser: new Promise<string>(() => {}),
+      physicalSettlement,
+      trace: new ChatGptTraceFeed(),
+      text: new ChatGptTextFeed(),
+      retireCapability: () => { retirements += 1; },
+      cancel: () => {},
+    });
+
+    await session.runExclusive(async () => {
+      session.setOutstanding([
+        { callId: "call_1", wireName: "exec_command", freeform: false, arguments: { cmd: "pwd" } },
+      ]);
+    });
+    settlePhysical();
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(session.isPhysicallySettled()).toBeTrue();
+    expect(retirements).toBe(0);
+
+    await session.runExclusive(async () => {
+      session.markResultDelivered("call_1");
+    });
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    expect(session.outstanding()).toEqual([]);
+    expect(retirements).toBe(1);
   });
 
   test("waits for completed browser cleanup before starting the next canonical instruction", async () => {
@@ -2167,6 +2203,39 @@ describe("ChatGPT outer-native harness v4", () => {
     await expect(callTurnBroker(socketPath, { method: "claim", token }))
       .rejects.toThrow("has already finished");
     await broker.close();
+  });
+
+  test("reaps an abandoned MCP activity lease before terminal completion", async () => {
+    const socketPath = brokerTestEndpoint(`cgw-h3-stale-activity-${process.pid}-${Date.now()}`);
+    const broker = TurnBroker.forSocket(socketPath);
+    const baseNow = 1_900_000_000_000;
+    const now = spyOn(Date, "now").mockReturnValue(baseNow);
+    try {
+      const token = await broker.register(
+        extractChatGptTurnEnvironment(parsed(environmentXml)),
+        TURN_BROKER_ACTIVITY_LEASE_MS * 4,
+        "stale-activity",
+      );
+      const claimed = await callTurnBroker<{ bindingId: string; activityId: string }>(socketPath, {
+        method: "claim",
+        token,
+      });
+      expect(broker.beginCompletionFence(token)).toBeUndefined();
+
+      now.mockReturnValue(baseNow + TURN_BROKER_ACTIVITY_LEASE_MS + 1);
+      const revision = broker.beginCompletionFence(token);
+      expect(revision).toBe(2);
+      expect(broker.commitCompletionFence(token, revision!)).toBeTrue();
+
+      await expect(callTurnBroker(socketPath, {
+        method: "claim",
+        token,
+        activityId: claimed.activityId,
+      })).rejects.toThrow("has already finished");
+    } finally {
+      now.mockRestore();
+      await broker.close();
+    }
   });
 
   test("activity cleanup is idempotent and tombstones an ambiguously delayed claim", async () => {
@@ -4023,7 +4092,7 @@ describe("adapter liveness covers every path through a turn", () => {
         const blocked = new AbortController();
         const beats: number[] = [];
         // The first turn owns the thread and never physically settles, so the second turn parks in
-        // getOrCreateAfterOwnerRetirement before any session — and before any per-session wiring —
+        // getOrCreateAfterOwnerRetirement before any session â€” and before any per-session wiring â€”
         // exists to speak for it.
         void run(livenessRequest("turn_live_1", "thread_live", false), () => {}, holder.signal).catch(() => {});
         await Bun.sleep(250);

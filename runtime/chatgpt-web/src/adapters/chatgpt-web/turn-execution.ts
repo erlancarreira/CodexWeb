@@ -284,6 +284,8 @@ export class ChatGptTurnSession {
   private finalPrelude: AdapterEvent[] = [];
   private settledBrowserOutcome?: ChatGptBrowserOutcome;
   private settledPhysical = false;
+  private physicalSettlementSucceeded = false;
+  private observerEntered = false;
   private attachedConversationKey: string | undefined;
   private tail: Promise<void> = Promise.resolve();
   private capabilityRetirementScheduled = false;
@@ -304,7 +306,11 @@ export class ChatGptTurnSession {
   ) {
     this.attachedConversationKey = runtime.conversationKey;
     this.physicalSettlement = runtime.physicalSettlement.then(
-      () => { this.settledPhysical = true; },
+      () => {
+        this.settledPhysical = true;
+        this.physicalSettlementSucceeded = true;
+        this.scheduleCapabilityRetirement();
+      },
       error => {
         this.settledPhysical = true;
         throw error;
@@ -330,6 +336,7 @@ export class ChatGptTurnSession {
 
   runExclusive<T>(task: () => Promise<T>): Promise<T> {
     this.touch();
+    this.observerEntered = true;
     const run = this.tail.then(task);
     this.tail = run.then(() => undefined, () => undefined);
     this.scheduleCapabilityRetirement();
@@ -393,6 +400,7 @@ export class ChatGptTurnSession {
     if (this.outstandingById.size === 0) {
       this.outstandingReasoning = [];
       this.outstandingPrelude = [];
+      this.scheduleCapabilityRetirement();
     }
   }
 
@@ -473,20 +481,37 @@ export class ChatGptTurnSession {
   }
 
   private scheduleCapabilityRetirement(): void {
-    if (this.capabilityRetirementScheduled || !this.runtime.retireCapability) return;
+    if (
+      this.capabilityRetirementScheduled
+      || !this.observerEntered
+      || !this.physicalSettlementSucceeded
+      || this.outstandingById.size > 0
+      || !this.runtime.retireCapability
+    ) return;
     this.capabilityRetirementScheduled = true;
-    // Register only after the first observer entered `runExclusive`. This ensures an immediately
-    // completed mocked/real browser cannot revoke its token ahead of the browser-outcome branch.
-    // At physical settlement, read the current tail so every tool-result/reconnect observer that
-    // was already admitted finishes before the capability is retired.
-    void this.physicalSettlement
-      .then(() => this.tail)
-      .then(() => this.runtime.retireCapability!())
-      .catch(error => {
-        console.error(
-          `[chatgpt-web] failed to retire settled turn capability: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
+    // A physical browser response may settle immediately after asking Codex to execute a tool.
+    // The capability must survive that boundary so the next native Responses request can publish
+    // the tool result back into the same browser turn. Retire only after the browser is physically
+    // settled, every outstanding tool result has arrived, and every already-admitted observer is
+    // drained. Re-read the tail until it is stable so a reconnect admitted during cleanup wins.
+    void (async () => {
+      for (;;) {
+        const observedTail = this.tail;
+        await observedTail;
+        if (this.tail !== observedTail) continue;
+        if (!this.physicalSettlementSucceeded || this.outstandingById.size > 0) {
+          this.capabilityRetirementScheduled = false;
+          this.scheduleCapabilityRetirement();
+          return;
+        }
+        await this.runtime.retireCapability!();
+        return;
+      }
+    })().catch(error => {
+      console.error(
+        `[chatgpt-web] failed to retire settled turn capability: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   }
 
   private round(key: string) {

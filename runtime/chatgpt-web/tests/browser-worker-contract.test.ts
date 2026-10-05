@@ -657,6 +657,17 @@ test("compaction retry submission evidence cannot make prompt-stage settlement u
   expect(evaluateStarted).toBeTrue();
 });
 
+test("operational viewport recovery reapplies a real viewport after CDP reconnect", async () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("async function waitForOperationalChatGptViewport");
+  const end = workerSource.indexOf("export const CHATGPT_COMPOSER_DOCUMENT_END_KEY", start);
+  const source = workerSource.slice(start, end);
+
+  expect(source).toContain("page.evaluate(() => ({");
+  expect(source).toContain("page.setViewportSize({ width: 800, height: 600 })");
+  expect(source).toContain("innerWidth >= width && innerHeight >= height");
+});
+
 test("launcher page acquisition proves a nonzero operational viewport before DOM interaction", () => {
   const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
   const connect = workerSource.indexOf("const connection = await connectLauncherBrowserHost(");
@@ -930,6 +941,177 @@ test("send fallback prefers DOM click and keeps keyboard activation bounded", ()
   expect(source).not.toContain("timeout: 0");
   expect(CHATGPT_SEND_KEYBOARD_ACTION_TIMEOUT_MS).toBe(2_500);
 });
+test("send activation falls back to DOM click when the enabled send control times out", async () => {
+  const provider: CodexProviderConfig = {
+    adapter: "chatgpt-web",
+    baseUrl: "browser://send-click-timeout-dom-" + Date.now() + "-" + Math.random(),
+    chatgptWeb: {
+      localToolsEnabled: true,
+      solAvailable: true,
+      extraHighAvailable: true,
+      proAvailable: true,
+      storageStatePath: "/tmp/send-click-timeout-dom-" + Date.now() + "-" + Math.random() + ".json",
+    },
+  };
+  const worker: any = ChatGptBrowserWorker.forProvider(provider);
+  const checkpoints: string[] = [];
+  const pressed: string[] = [];
+  let domClickActivated = false;
+  let clickOptions: { noWaitAfter?: boolean; timeout?: number } | undefined;
+
+  const hiddenLocator = {
+    filter() { return this; },
+    count: async () => 0,
+    last() { return this; },
+    getByText() { return this; },
+    isVisible: async () => false,
+  };
+  const page = {
+    isClosed: () => false,
+    locator: () => hiddenLocator,
+  } as unknown as Page;
+
+  const timeout = new Error("send control remained non-actionable");
+  timeout.name = "TimeoutError";
+  const sendButton = {
+    isEnabled: async () => true,
+    click: async (options?: { noWaitAfter?: boolean; timeout?: number }) => {
+      clickOptions = options;
+      throw timeout;
+    },
+    evaluate: async (callback: (element: { click: () => void }) => unknown) => callback({
+      click: () => { domClickActivated = true; },
+    }),
+  };
+  const sendButtons = {
+    filter() { return this; },
+    count: async () => 1,
+    first: () => sendButton,
+  };
+  const composer = {
+    locator: () => ({
+      locator: (selector: string) => {
+        expect(selector).toBe(CHATGPT_SEND_BUTTON_SELECTOR);
+        return sendButtons;
+      },
+    }),
+    isEditable: async () => true,
+    press: async (key: string) => { pressed.push(key); },
+  };
+
+  worker.activeComposer = async () => composer;
+  worker.currentSubmissionEvidence = async () => domClickActivated ? "user_turn" : undefined;
+  worker.waitForSubmissionAcceptedWithRecovery = async () => "user_turn";
+
+  const baseline: any = { submittedText: "Responda apenas OK" };
+  const evidence = await worker.sendAttachedPrompt(
+    page,
+    baseline,
+    async (checkpoint: string) => { checkpoints.push(checkpoint); },
+  );
+
+  expect(evidence).toBe("user_turn");
+  expect(clickOptions).toMatchObject({
+    noWaitAfter: true,
+    timeout: CHATGPT_SEND_CLICK_ACTION_TIMEOUT_MS,
+  });
+  expect(domClickActivated).toBeTrue();
+  expect(pressed).toEqual([]);
+  expect(checkpoints).toContain("send-click-timeout");
+  expect(checkpoints).toContain("send-click-timeout-dom-fallback");
+  expect(checkpoints).toContain("send-dom-click-fallback-activated");
+  expect(checkpoints).not.toContain("send-keyboard-fallback-activated");
+  expect(checkpoints).toContain("send-activated");
+  expect(baseline.sendActivated).toBeTrue();
+});
+
+test("send activation uses a bounded Enter fallback when pointer and DOM clicks both fail", async () => {
+  const provider: CodexProviderConfig = {
+    adapter: "chatgpt-web",
+    baseUrl: "browser://send-click-timeout-keyboard-" + Date.now() + "-" + Math.random(),
+    chatgptWeb: {
+      localToolsEnabled: true,
+      solAvailable: true,
+      extraHighAvailable: true,
+      proAvailable: true,
+      storageStatePath: "/tmp/send-click-timeout-keyboard-" + Date.now() + "-" + Math.random() + ".json",
+    },
+  };
+  const worker: any = ChatGptBrowserWorker.forProvider(provider);
+  const checkpoints: string[] = [];
+  const pressed: string[] = [];
+  const pressOptions: Array<{ noWaitAfter?: boolean; timeout?: number }> = [];
+
+  const hiddenLocator = {
+    filter() { return this; },
+    count: async () => 0,
+    last() { return this; },
+    getByText() { return this; },
+    isVisible: async () => false,
+  };
+  const page = {
+    isClosed: () => false,
+    locator: () => hiddenLocator,
+  } as unknown as Page;
+
+  const timeout = new Error("send control remained non-actionable");
+  timeout.name = "TimeoutError";
+  const sendButton = {
+    isEnabled: async () => true,
+    click: async () => { throw timeout; },
+    evaluate: async () => { throw new Error("DOM click failed"); },
+  };
+  const sendButtons = {
+    filter() { return this; },
+    count: async () => 1,
+    first: () => sendButton,
+  };
+  const composer = {
+    locator: () => ({
+      locator: (selector: string) => {
+        expect(selector).toBe(CHATGPT_SEND_BUTTON_SELECTOR);
+        return sendButtons;
+      },
+    }),
+    isEditable: async () => true,
+    press: async (key: string, options?: { noWaitAfter?: boolean; timeout?: number }) => {
+      pressed.push(key);
+      pressOptions.push(options ?? {});
+    },
+  };
+
+  worker.activeComposer = async () => composer;
+  worker.waitForSubmissionAcceptedWithRecovery = async () => "user_turn";
+
+  const baseline: any = { submittedText: "Responda apenas OK" };
+  const evidence = await worker.sendAttachedPrompt(
+    page,
+    baseline,
+    async (checkpoint: string) => { checkpoints.push(checkpoint); },
+  );
+
+  expect(evidence).toBe("user_turn");
+  expect(pressed).toEqual(["Enter"]);
+  expect(pressOptions[0]).toMatchObject({
+    noWaitAfter: true,
+    timeout: CHATGPT_SEND_KEYBOARD_ACTION_TIMEOUT_MS,
+  });
+  expect(checkpoints).toContain("send-click-timeout-dom-fallback");
+  expect(checkpoints).toContain("send-dom-click-fallback-failed");
+  expect(checkpoints).toContain("send-click-timeout-keyboard-fallback");
+  expect(checkpoints).toContain("send-keyboard-fallback-activated");
+  expect(baseline.sendActivated).toBeTrue();
+});
+
+test("sendAttachedPrompt never uses an unbounded keyboard action timeout", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("private async sendAttachedPrompt");
+  const end = workerSource.indexOf("private async waitForMultipartAcknowledgement", start);
+  const source = workerSource.slice(start, end);
+  expect(source).toContain("CHATGPT_SEND_KEYBOARD_ACTION_TIMEOUT_MS");
+  expect(source).not.toContain("timeout: 0");
+});
+
 test("two-part saved chats re-prove unchanged effort after the first message creates the conversation URL", async () => {
   const root = mkdtempSync(join(tmpdir(), "saved-chat-multipart-"));
   const capabilities = { localToolsEnabled: false, solAvailable: true, extraHighAvailable: false, proAvailable: false };
@@ -1024,7 +1206,7 @@ test("submission observation recovery resumes with rebound locators and is stric
     baseUrl: `browser://submission-recovery-${Date.now()}-${Math.random()}`,
     chatgptWeb: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
   };
-  type Evidence = "user_turn" | "assistant_turn" | "generation_running" | "mcp_tool_call";
+  type Evidence = "user_turn" | "assistant_turn" | "mcp_tool_call";
   type Recovery = { page: Page; baseline: unknown };
   const worker = ChatGptBrowserWorker.forProvider(provider) as unknown as {
     waitForSubmissionAcceptedWithRecovery(
@@ -1190,6 +1372,123 @@ test("an accepted turn rebinds the missing assistant observation and acknowledge
   } finally {
     clearTimeout(timer);
   }
+});
+
+test("60s completion diagnostics distinguish active transport from an actual stall", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("if (!loggedCompletionWait && Date.now() - sentAt >= 60_000)");
+  const end = workerSource.indexOf("} else {", start);
+  const source = workerSource.slice(start, end);
+
+  expect(source).toContain("transportProgressLive");
+  expect(source).toContain('"response-active-60s"');
+  expect(source).toContain('"response-stalled-60s"');
+  expect(source).toContain("completionWaitLog");
+});
+
+test("submitted managed-page resync races viewport recovery against transport progress", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("response_page_resync_");
+  const end = workerSource.indexOf("response_page_reload_", start);
+  const source = workerSource.slice(start, end);
+
+  expect(source).toContain("submissionRejection.networkIsLive");
+  expect(source).toContain("chatGptExternalProgressIsLive");
+  expect(source.indexOf("submissionRejection.networkIsLive")).toBeLessThan(
+    source.indexOf("const resyncAbort = new AbortController()"),
+  );
+  expect(source).toContain("const resyncAbort = new AbortController()");
+  expect(source).toContain("submissionRejection.waitForNetworkChange");
+  expect(source).toContain("turn.externalProgress.waitForChange");
+  expect(source).toContain("const outcome = await Promise.race(waits)");
+  expect(source).toContain("resyncAbort.abort()");
+});
+
+test("live external progress suppresses DOM-timeout recovery until tool progress advances", async () => {
+  const provider: CodexProviderConfig = {
+    adapter: "chatgpt-web",
+    baseUrl: `browser://live-progress-no-rebind-${Date.now()}-${Math.random()}`,
+    chatgptWeb: { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
+  };
+  type Baseline = {
+    initialTurnIdentities: string[];
+    domCache: Record<string, unknown>;
+  };
+  const worker = ChatGptBrowserWorker.forProvider(provider) as unknown as {
+    waitForNewAssistantTurn(
+      page: Page,
+      baseline: Baseline,
+      deadline: number | undefined,
+      signal?: AbortSignal,
+      externalProgress?: ChatGptExternalTurnProgress,
+      graceMs?: number,
+      completionTracker?: ChatGptCompletionTracker,
+      recoverObservation?: (
+        attempt: number,
+        cause: ChatGptBrowserObservationTimeoutError,
+        baseline: Baseline,
+        signal?: AbortSignal,
+      ) => Promise<{ page: Page; baseline: Baseline }>,
+    ): Promise<{ identity: string; locator: unknown }>;
+    submissionDomState(page: Page, cache: Record<string, unknown>): Promise<{
+      turnIdentities: string[];
+      userIdentities: string[];
+      responseIdentities: string[];
+    }>;
+    responseDomSnapshot(): Promise<{ visibleText: string }>;
+  };
+
+  const hiddenLocator = {
+    filter() { return this; },
+    last() { return this; },
+    isVisible: async () => false,
+  };
+  const assistantLocator = { id: "assistant-live-progress" };
+  const page = {
+    isClosed: () => false,
+    locator: (selector: string) => selector.startsWith("[data-turn-id=")
+      ? assistantLocator
+      : hiddenLocator,
+    evaluate: () => new Promise(() => {}),
+  } as unknown as Page;
+  const baseline: Baseline = { initialTurnIdentities: [], domCache: {} };
+  const progress = new ChatGptExternalTurnProgress();
+  progress.recordToolBatch(1);
+  const completionTracker = new ChatGptCompletionTracker();
+  let observations = 0;
+  worker.submissionDomState = async () => {
+    observations += 1;
+    if (observations === 1) {
+      setTimeout(() => progress.recordToolResult(), 0);
+      throw new ChatGptBrowserObservationTimeoutError(5_000);
+    }
+    return {
+      turnIdentities: ["conversation-turn-user", "conversation-turn-assistant"],
+      userIdentities: ["conversation-turn-user"],
+      responseIdentities: ["conversation-turn-assistant"],
+    };
+  };
+  worker.responseDomSnapshot = async () => ({ visibleText: "tool finished" });
+
+  let recoveries = 0;
+  const binding = await worker.waitForNewAssistantTurn(
+    page,
+    baseline,
+    undefined,
+    undefined,
+    progress,
+    60_000,
+    completionTracker,
+    async () => {
+      recoveries += 1;
+      return { page, baseline };
+    },
+  );
+
+  expect(binding.identity).toBe("conversation-turn-assistant");
+  expect(binding.locator).toBe(assistantLocator);
+  expect(observations).toBe(2);
+  expect(recoveries).toBe(0);
 });
 
 test("missing-assistant expiry checks fresh DOM after a delayed wake while preserving the turn deadline", async () => {
@@ -4224,7 +4523,7 @@ test("stalled-turn diagnostics record DOM metrics without response or overlay co
   expect(diagnosticSource).not.toMatch(/\bariaLabel:\s*candidate\.getAttribute/);
 });
 
-test("browser send accepts only new logical turns or generation, not remounted history", () => {
+test("browser send accepts only causal new turns, not running state or remounted history", () => {
   const idle = {
     initialTurnIdentities: ["old-user", "old-answer", "current-user", "current-answer"],
     userIdentities: ["current-user"],
@@ -4236,7 +4535,7 @@ test("browser send accepts only new logical turns or generation, not remounted h
   expect(chatGptSubmissionEvidence({ ...idle, responseIdentities: ["old-answer", "current-answer"] })).toBeUndefined();
   expect(chatGptSubmissionEvidence({ ...idle, userIdentities: ["current-user", "new-user"] })).toBe("user_turn");
   expect(chatGptSubmissionEvidence({ ...idle, responseIdentities: ["current-answer", "new-answer"] })).toBe("assistant_turn");
-  expect(chatGptSubmissionEvidence({ ...idle, generationRunning: true })).toBe("generation_running");
+  expect(chatGptSubmissionEvidence({ ...idle, generationRunning: true })).toBeUndefined();
 });
 
 test("visible reasoning keeps the browser turn healthy before final assistant markdown exists", () => {
