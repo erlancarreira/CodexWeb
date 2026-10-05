@@ -19,7 +19,7 @@ $desktopProfile = Join-Path $coreHome 'desktop-profile'
 $logDir = Join-Path $coreHome 'logs'
 $proxyWatcher = Join-Path $root 'watch-codex-web-proxy.ps1'
 
-foreach ($required in @($appExe, $launcherExe, $codexCli)) {
+foreach ($required in @($appExe, $codexCli)) {
   if (!(Test-Path $required)) { throw "Required Codex Web component not found: $required" }
 }
 New-Item -ItemType Directory -Force $codexHome, $desktopProfile, $logDir | Out-Null
@@ -28,6 +28,7 @@ New-Item -ItemType Directory -Force $codexHome, $desktopProfile, $logDir | Out-N
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 
 if (!(Test-Path $runtimeConfigPath)) {
+  if (!(Test-Path $launcherExe)) { throw "Codex Web launcher not found for first-time setup: $launcherExe" }
   Start-Process -FilePath $launcherExe | Out-Null
   throw 'Codex Web needs first-time setup. Complete ChatGPT login/setup in the Codex Web window, then reopen Codex Web.'
 }
@@ -53,9 +54,12 @@ if (!(Test-Path $codexConfig)) {
   [IO.File]::WriteAllText($codexConfig, $text, [Text.UTF8Encoding]::new($false))
 }
 
-$launcherProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $launcherExe } | Select-Object -First 1
-if (-not $launcherProcess) {
-  Start-Process -FilePath $launcherExe -ArgumentList '--hidden' | Out-Null
+if ([string]$runtimeConfig.browserHost -eq 'launcher') {
+  if (!(Test-Path $launcherExe)) { throw "Codex Web launcher required by browserHost=launcher but not found: $launcherExe" }
+  $launcherProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $launcherExe } | Select-Object -First 1
+  if (-not $launcherProcess) {
+    Start-Process -FilePath $launcherExe -ArgumentList '--hidden' | Out-Null
+  }
 }
 
 $port = [int]$runtimeConfig.port
@@ -90,7 +94,19 @@ if (-not $watcherRunning -and (Test-Path $proxyWatcher)) {
 }
 
 if ([string]$runtimeConfig.mode -eq 'full') {
-  $tunnelAlias = if ($runtimeConfig.tunnel -and $runtimeConfig.tunnel.alias) { [string]$runtimeConfig.tunnel.alias } else { 'codex-chatgpt-web' }
+  if (-not $runtimeConfig.tunnel) { throw 'Codex Web full mode requires tunnel configuration.' }
+  $tunnelExe = [string]$runtimeConfig.tunnel.binaryPath
+  $tunnelProfileDir = [string]$runtimeConfig.tunnel.profileDir
+  $tunnelProfileName = [string]$runtimeConfig.tunnel.profileName
+  if (!(Test-Path $tunnelExe)) { throw "Codex Web tunnel binary not found: $tunnelExe" }
+  $tunnelProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.ExecutablePath -eq $tunnelExe -and $_.CommandLine -like "*--profile $tunnelProfileName*" } |
+    Select-Object -First 1
+  if (-not $tunnelProcess) {
+    Start-Process -FilePath $tunnelExe -ArgumentList @('run','--profile-dir',$tunnelProfileDir,'--profile',$tunnelProfileName) -WindowStyle Hidden | Out-Null
+  }
+
+  $tunnelAlias = if ($runtimeConfig.tunnel.alias) { [string]$runtimeConfig.tunnel.alias } else { 'codex-chatgpt-web' }
   $tunnelHealthFile = Join-Path $HOME ".local\state\tunnel-client\health\$tunnelAlias.url"
   $tunnelReady = $false
   $tunnelReadyDetail = 'health endpoint not published yet'

@@ -1378,7 +1378,7 @@ test("active composer falls back only to the focused structural textarea when kn
   expect(await activeComposer.call({}, page, 500)).toBe(fallbackComposer);
 });
 
-test("prompt verification accepts Lexical NBSP preservation without weakening other mismatches", async () => {
+test("prompt verification accepts safe Lexical text normalization without weakening other mismatches", async () => {
   // Lexical may preserve indentation as alternating NBSP and ASCII spaces while keeping the same
   // UTF-16 length; that representation is equivalent only for whitespace runs.
   const expected = `prefix C\\n${" ".repeat(24)}suffix`;
@@ -1401,6 +1401,11 @@ test("prompt verification accepts Lexical NBSP preservation without weakening ot
   expect(promptTextEquivalent.call(worker, "a  b", "a\u00A0 b")).toBeTrue();
   expect(promptTextEquivalent.call(worker, "a b", "a\u00A0b")).toBeFalse();
   expect(promptTextEquivalent.call(worker, "a\u00A0b", "a b")).toBeFalse();
+
+  // Windows CRLF is normalized by contenteditable/Lexical to LF without losing content.
+  expect(promptTextEquivalent.call(worker, "a\r\nb\r\nc", "a\nb\nc")).toBeTrue();
+  expect(promptTextEquivalent.call(worker, "a\nb", "a\r\nb")).toBeFalse();
+  expect(promptTextEquivalent.call(worker, "a\rb", "a\nb")).toBeFalse();
 
   // Other whitespace and same-length text mutations must remain fail closed.
   expect(promptTextEquivalent.call(worker, "a b", "a\tb")).toBeFalse();

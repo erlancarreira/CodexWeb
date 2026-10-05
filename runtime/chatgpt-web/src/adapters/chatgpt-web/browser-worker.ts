@@ -2878,47 +2878,74 @@ export class ChatGptBrowserWorker {
   private promptCodeUnitEquivalent(
     expected: string,
     observed: string,
-    index: number,
+    expectedIndex: number,
+    observedIndex = expectedIndex,
   ): boolean {
-    const expectedUnit = expected[index];
-    const observedUnit = observed[index];
+    const expectedUnit = expected[expectedIndex];
+    const observedUnit = observed[observedIndex];
 
     if (expectedUnit === observedUnit) return true;
     if (expectedUnit !== " " || observedUnit !== "\u00A0") return false;
 
-    return expected[index - 1] === " " || expected[index + 1] === " ";
+    return expected[expectedIndex - 1] === " " || expected[expectedIndex + 1] === " ";
   }
 
   private promptTextEquivalent(
     expected: string,
     observed: string,
   ): boolean {
-    if (expected.length !== observed.length) return false;
+    let expectedIndex = 0;
+    let observedIndex = 0;
 
-    for (let index = 0; index < expected.length; index += 1) {
-      if (!this.promptCodeUnitEquivalent(expected, observed, index)) {
+    while (expectedIndex < expected.length && observedIndex < observed.length) {
+      // Lexical/contenteditable normalizes Windows CRLF inserted as plain text to LF.
+      // Accept only that directional representation change; every other mutation fails closed.
+      if (
+        expected[expectedIndex] === "\r"
+        && expected[expectedIndex + 1] === "\n"
+        && observed[observedIndex] === "\n"
+      ) {
+        expectedIndex += 2;
+        observedIndex += 1;
+        continue;
+      }
+
+      if (!this.promptCodeUnitEquivalent(expected, observed, expectedIndex, observedIndex)) {
         return false;
       }
+      expectedIndex += 1;
+      observedIndex += 1;
     }
 
-    return true;
+    return expectedIndex === expected.length && observedIndex === observed.length;
   }
 
   private promptEquivalentPrefixLength(
     expected: string,
     observed: string,
   ): number {
-    const length = Math.min(expected.length, observed.length);
+    let expectedIndex = 0;
+    let observedIndex = 0;
 
-    let index = 0;
-    while (
-      index < length
-      && this.promptCodeUnitEquivalent(expected, observed, index)
-    ) {
-      index += 1;
+    while (expectedIndex < expected.length && observedIndex < observed.length) {
+      if (
+        expected[expectedIndex] === "\r"
+        && expected[expectedIndex + 1] === "\n"
+        && observed[observedIndex] === "\n"
+      ) {
+        expectedIndex += 2;
+        observedIndex += 1;
+        continue;
+      }
+
+      if (!this.promptCodeUnitEquivalent(expected, observed, expectedIndex, observedIndex)) {
+        break;
+      }
+      expectedIndex += 1;
+      observedIndex += 1;
     }
 
-    return index;
+    return expectedIndex;
   }
 
   run(turn: BrowserTurn): Promise<string> {
