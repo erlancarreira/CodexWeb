@@ -100,7 +100,7 @@ if ([string]$runtimeConfig.mode -eq 'full') {
   $tunnelProfileName = [string]$runtimeConfig.tunnel.profileName
   if (!(Test-Path $tunnelExe)) { throw "Codex Web tunnel binary not found: $tunnelExe" }
   $tunnelProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.ExecutablePath -eq $tunnelExe -and $_.CommandLine -like "*--profile $tunnelProfileName*" } |
+    Where-Object { $_.ExecutablePath -eq $tunnelExe } |
     Select-Object -First 1
   if (-not $tunnelProcess) {
     Start-Process -FilePath $tunnelExe -ArgumentList @('run','--profile-dir',$tunnelProfileDir,'--profile',$tunnelProfileName) -WindowStyle Hidden | Out-Null

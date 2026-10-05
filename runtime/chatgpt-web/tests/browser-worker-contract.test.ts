@@ -1378,6 +1378,14 @@ test("active composer falls back only to the focused structural textarea when kn
   expect(await activeComposer.call({}, page, 500)).toBe(fallbackComposer);
 });
 
+test("prompt readback preserves rendered line breaks from contenteditable composers", () => {
+  const workerSource = readFileSync(new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url), "utf8");
+  const start = workerSource.indexOf("private async attachedPromptText");
+  const end = workerSource.indexOf("private async assertPromptAttached", start);
+  const source = workerSource.slice(start, end);
+  expect(source).toContain('element.innerText ?? element.textContent ?? ""');
+  expect(source).not.toContain('return (element.textContent ?? "").trimStart()');
+});
 test("prompt verification accepts safe Lexical text normalization without weakening other mismatches", async () => {
   // Lexical may preserve indentation as alternating NBSP and ASCII spaces while keeping the same
   // UTF-16 length; that representation is equivalent only for whitespace runs.
