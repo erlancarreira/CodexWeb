@@ -1424,6 +1424,14 @@ test("prompt verification accepts safe Lexical text normalization without weaken
   expect(largeExpected).toHaveLength(158445);
   expect(largeObserved).toHaveLength(158482);
   expect(promptTextEquivalent.call(worker, largeExpected, largeObserved)).toBeTrue();
+
+  const compactedLines = ["y".repeat(23), ...Array.from({ length: 17 }, (_, index) => `part-${index}`)];
+  const compactedSeed = compactedLines.join("\r\n");
+  const compactedExpected = compactedSeed + "q".repeat(158445 - compactedSeed.length);
+  const compactedObserved = compactedExpected.replace(/\r\n/g, "\n");
+  expect(compactedExpected).toHaveLength(158445);
+  expect(compactedObserved).toHaveLength(158428);
+  expect(promptTextEquivalent.call(worker, compactedExpected, compactedObserved)).toBeTrue();
   // Other whitespace and same-length text mutations must remain fail closed.
   expect(promptTextEquivalent.call(worker, "a b", "a\tb")).toBeFalse();
   expect(promptTextEquivalent.call(worker, "a\nb", "a b")).toBeFalse();

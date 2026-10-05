@@ -4156,8 +4156,12 @@ export class ChatGptBrowserWorker {
     }
     throwIfPromptAttachmentAborted(abortSignal);
     const commonPrefix = this.promptEquivalentPrefixLength(prompt, observed);
+    const normalizedExpected = this.normalizePromptLineEndings(prompt);
+    const normalizedObserved = this.normalizePromptLineEndings(observed);
+    const expectedCodeUnit = normalizedExpected?.charCodeAt(commonPrefix) ?? -1;
+    const observedCodeUnit = normalizedObserved?.charCodeAt(commonPrefix) ?? -1;
     throw new ChatGptPromptAttachmentIntegrityError(
-      `ChatGPT composer did not preserve the complete prompt (expectedChars=${prompt.length}, actualChars=${observed.length}, commonPrefixChars=${commonPrefix})`,
+      `ChatGPT composer did not preserve the complete prompt (expectedChars=${prompt.length}, actualChars=${observed.length}, commonPrefixChars=${commonPrefix}, normalizedExpectedChars=${normalizedExpected?.length ?? -1}, normalizedObservedChars=${normalizedObserved?.length ?? -1}, expectedCodeUnit=${expectedCodeUnit}, observedCodeUnit=${observedCodeUnit})`,
     );
   }
 
