@@ -106,10 +106,10 @@ bun run app
 
 <!--
 Version sync:
-  /releases/download/v6.2.0/codex-web-gpt-6.2.0-win-x64.exe
-  /releases/download/v6.2.0/codex-web-gpt-6.2.0-mac-arm64.dmg
-  /releases/download/v6.2.0/codex-web-gpt-6.2.0-mac-x64.dmg
-  /releases/download/v6.2.0/codex-web-gpt-6.2.0-linux-x64.AppImage
+  /releases/download/v6.2.2/codex-web-gpt-6.2.2-win-x64.exe
+  /releases/download/v6.2.2/codex-web-gpt-6.2.2-mac-arm64.dmg
+  /releases/download/v6.2.2/codex-web-gpt-6.2.2-mac-x64.dmg
+  /releases/download/v6.2.2/codex-web-gpt-6.2.2-linux-x64.AppImage
 -->
 
 ## ドキュメント

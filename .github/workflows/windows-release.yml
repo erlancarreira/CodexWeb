@@ -90,6 +90,10 @@ jobs:
         working-directory: runtime/chatgpt-web
         run: |
           bun run typecheck
+          bun run check-version
+          bun run audit
+          bun run launcher:audit
+          bun run launcher:typecheck
           bun test tests/browser-worker-contract.test.ts --timeout 15000
           bun test tests/chatgpt-web-harness.test.ts --timeout 15000
           bun test tests/launcher-helper-client.test.ts tests/turn-broker-lifecycle.test.ts --timeout 15000

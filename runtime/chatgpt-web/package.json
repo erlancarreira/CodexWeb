@@ -1,6 +1,6 @@
 {
   "name": "codex-chatgpt-web",
-  "version": "6.2.1",
+  "version": "6.2.2",
   "private": true,
   "description": "A focused local Responses bridge that runs Codex tasks through a user-authenticated ChatGPT web session.",
   "repository": {
@@ -54,7 +54,7 @@
     "verify": "bun run scripts/verify.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "chromium-bidi": "12.1.0",
@@ -80,7 +80,8 @@
     "hono": "4.13.7",
     "qs": "6.16.0",
     "zod-to-json-schema": "3.25.1",
-    "ip-address": "10.7.2"
+    "ip-address": "10.7.2",
+    "proxy-addr": "2.0.8"
   },
   "keywords": [
     "codex",
