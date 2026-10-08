@@ -6640,7 +6640,14 @@ export class ChatGptBrowserWorker {
       const compactionProjection = turn.compaction
         ? new ChatGptCompactionProjection()
         : undefined;
-      const markdownBuffer = compactionProjection ?? new ChatGptMarkdownBuffer();
+      // Tool-capable turns may rewrite earlier answer blocks after an MCP call.
+      // Native deltas cannot be retracted, so commit the final answer only after
+      // the completion fence. Commentary and tool progress still stream live.
+      const markdownBuffer = compactionProjection ?? new ChatGptMarkdownBuffer(
+        markdown => markdown,
+        750,
+        !turn.externalProgress,
+      );
       const checkpointStream = turn.captureLunaCheckpoint
         ? new ChatGptLunaCheckpointStream()
         : undefined;

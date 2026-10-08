@@ -324,3 +324,45 @@ test("DIL response extraction preserves ownership, commentary and completion bou
   expect(noCopy.visibleText).toBe("CODEX WEB GPT READY");
   expect(noCopy.completionActionVisible).toBeFalse();
 });
+
+test("tool-capable answer defers mutable Markdown and preserves virtualized completed prefixes", () => {
+  const buffer = new ChatGptMarkdownBuffer(markdown => markdown, 0, false);
+  const block = (key: string, text: string, start: number, end: number) => ({
+    key,
+    tag: "p",
+    html: `<p data-start="${start}" data-end="${end}">${text}</p>`,
+    text,
+    sourceStart: start,
+    sourceEnd: end,
+    streamable: true,
+  });
+  const verification = block("0:p", "Checking Vercel readiness", 0, 25);
+  const command = block("27:p", "Executing vercel inspect", 27, 51);
+  const result = block("53:p", "Initial command output", 53, 75);
+  expect(buffer.observe([verification, command, result], 0)).toBe("");
+
+  // The renderer changes text after an MCP command, without retracting native deltas.
+  const corrected = block("27:p", "Vercel inspection complete", 27, 51);
+  const finalResult = block("53:p", "Contact form is ready", 53, 75);
+  expect(buffer.observe([verification, corrected, finalResult], 1_000)).toBe("");
+  expect(buffer.currentSnapshotIsConsistent()).toBeTrue();
+
+  // React virtualizes the previous prefix; source ranges identify the retained blocks.
+  const closing = block("77:p", "Finished", 77, 85);
+  expect(buffer.observe([finalResult, closing], 2_000)).toBe("");
+  expect(buffer.finish()).toEqual({
+    markdown: "Checking Vercel readiness\n\nVercel inspection complete\n\nContact form is ready\n\nFinished",
+    delta: "Checking Vercel readiness\n\nVercel inspection complete\n\nContact form is ready\n\nFinished",
+  });
+});
+
+test("deferred answer ignores a transient empty renderer frame without losing the text", () => {
+  const buffer = new ChatGptMarkdownBuffer(markdown => markdown, 0, false);
+  const stable = [{
+    key: "0:p", tag: "p", html: "<p>Done.</p>", text: "Done.",
+    sourceStart: 0, sourceEnd: 5, streamable: true,
+  }];
+  expect(buffer.observe(stable, 0)).toBe("");
+  expect(buffer.observe([], 100)).toBe("");
+  expect(buffer.finish().markdown).toBe("Done.");
+});

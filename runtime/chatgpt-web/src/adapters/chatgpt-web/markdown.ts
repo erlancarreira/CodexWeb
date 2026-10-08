@@ -220,14 +220,24 @@ export class ChatGptMarkdownBuffer {
       return "";
     }
     this.consistencyError = undefined;
-    this.latest = reconciled.map(segment => ({ ...segment }));
     if (!this.streamDuringObservation) {
-      // Compaction text is never exposed to Codex as message deltas. Keep only the newest
-      // renderer projection and serialize it once at completion, so harmless ChatGPT rewrites
-      // cannot be mistaken for an illegal retraction of client-visible output.
+      // Tool-capable responses and compaction are not yet committed to Codex. React may
+      // rewrite provisional content, or virtualize a completed prefix while rendering the
+      // remaining answer. Preserve only unambiguously preceding source-ranged blocks.
       this.candidates.clear();
+      if (reconciled.length > 0) {
+        const firstStart = reconciled[0]?.sourceStart;
+        const canPreservePrefix = firstStart !== undefined
+          && this.latest.length > 0
+          && this.latest.every(segment => segment.sourceStart !== undefined && segment.sourceEnd !== undefined);
+        const prefix = canPreservePrefix
+          ? this.latest.filter(segment => segment.sourceEnd! < firstStart)
+          : [];
+        this.latest = [...prefix, ...reconciled.map(segment => ({ ...segment }))];
+      }
       return "";
     }
+    this.latest = reconciled.map(segment => ({ ...segment }));
 
     const visibleCandidates = new Set<string>();
     for (const segment of reconciled) {
