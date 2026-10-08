@@ -127,9 +127,18 @@ test("turn sequence and primary request invariants fail closed", () => {
   let active = apply(state, "runtime", { type: "prepare", at: 1 });
   active = apply(active, "runtime", { type: "submission_sent", at: 2 });
   active = apply(active, "transport", { type: "transport_accepted", at: 3, requestId: "r1", status: 200 });
-  expect(() => apply(active, "transport", {
+  const auxiliary = apply(active, "transport", {
     type: "transport_data", at: 4, requestId: "r2", bytes: 1,
-  })).toThrow("primary request");
+  });
+  expect(auxiliary).toMatchObject({
+    primaryRequestId: "r1",
+    phase: "accepted",
+    sequence: active.sequence + 1,
+    hasTransportData: false,
+  });
+  expect(() => apply(active, "transport", {
+    type: "transport_accepted", at: 4, requestId: "r2", status: 200,
+  })).toThrow("already owns primary request");
 });
 
 

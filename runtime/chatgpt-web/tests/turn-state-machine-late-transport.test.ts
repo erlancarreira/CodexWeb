@@ -75,3 +75,25 @@ test("late auxiliary transport_data is consumed while finalizing without replaci
   expect(state.transportFinished).toBeTrue();
   expect(state.hasTransportData).toBeTrue();
 });
+
+test("concurrent data cannot disconnect a turn while its tool is running", () => {
+  let state = createTurnState();
+  state = apply(state, "runtime", { type: "prepare", at: 1 });
+  state = apply(state, "runtime", { type: "submission_sent", at: 2 });
+  state = apply(state, "transport", { type: "transport_accepted", at: 3, requestId: "primary", status: 200 });
+  state = apply(state, "tool", { type: "tool_requested", at: 4, callIds: ["git-status"] });
+  state = apply(state, "tool", { type: "tool_started", at: 5, callId: "git-status" });
+
+  state = apply(state, "transport", { type: "transport_data", at: 6, requestId: "parallel", bytes: 1024 });
+  expect(state.phase).toBe("tool_running");
+  expect(state.primaryRequestId).toBe("primary");
+  expect(state.hasTransportData).toBeFalse();
+  expect(state.activeToolCalls).toEqual(["git-status"]);
+
+  state = apply(state, "transport", { type: "transport_data", at: 7, requestId: "primary", bytes: 32 });
+  state = apply(state, "transport", { type: "transport_finished", at: 8, requestId: "primary" });
+  state = apply(state, "tool", { type: "tool_completed", at: 9, callId: "git-status" });
+  expect(state.phase).toBe("finalizing");
+  state = apply(state, "runtime", { type: "complete", at: 10 });
+  expect(state.phase).toBe("completed");
+});

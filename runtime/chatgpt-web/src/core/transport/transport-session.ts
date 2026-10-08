@@ -111,16 +111,28 @@ export class AssistantTransportCorrelationPolicy implements TransportCorrelation
     currentPrimaryRequestId?: string,
   ): string | undefined {
     const current = currentPrimaryRequestId ? requests[currentPrimaryRequestId] : undefined;
-    if (
-      current
-      && current.role === "candidate"
-      && current.lifecycle !== "finished"
-      && current.lifecycle !== "failed"
-      && (acceptedStatus(current.responseStatus) || requestHasAuthoritativeProgress(current))
-    ) {
-      // An active accepted primary is sticky. A concurrent matching request cannot steal authority
-      // until the current request reaches a terminal transport state.
-      return current.requestId;
+    if (current?.role === "candidate") {
+      const failure = current.lifecycle === "failed"
+        ? classifyTransportFailure(current)
+        : undefined;
+      if (acceptedStatus(current.responseStatus) && (current.lifecycle !== "failed" || failure === "benign")) {
+        // A proven response remains the primary even after its HTTP stream finishes: the
+        // same ChatGPT turn may still be running tools. Another concurrent POST must not
+        // take over the lifecycle just because this request has finished.
+        return current.requestId;
+      }
+      if (failure === "recoverable") {
+        // Promote a genuine later retry as soon as it is accepted, before its first data
+        // chunk. Otherwise the lifecycle sees data for a request it never accepted.
+        const retry = Object.values(requests)
+          .filter(request => request.role === "candidate"
+            && request.requestId !== current.requestId
+            && request.sentAt > current.sentAt
+            && request.lifecycle !== "failed"
+            && acceptedStatus(request.responseStatus))
+          .sort((left, right) => right.sentAt - left.sentAt || left.requestId.localeCompare(right.requestId))[0];
+        if (retry) return retry.requestId;
+      }
     }
 
     const candidates = Object.values(requests).filter(request => request.role === "candidate");

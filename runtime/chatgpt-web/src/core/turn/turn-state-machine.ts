@@ -225,7 +225,12 @@ export function reduceTurnState(state: TurnState, input: SequencedTurnEvent): Tu
           : {});
       }
       if (state.primaryRequestId !== event.requestId) {
-        throw new InvalidTurnTransitionError(state.phase, event.type, "Transport data does not belong to the primary request");
+        if (!state.primaryRequestId) {
+          throw new InvalidTurnTransitionError(state.phase, event.type, "Transport data requires an accepted primary request");
+        }
+        // A queued chunk from an older or auxiliary request cannot become primary.
+        // Keep the event sequence monotonic without dropping the live turn.
+        return withSequence(state, input, {});
       }
       return withSequence(state, input, {
         phase: state.phase === "waiting_tool" || state.phase === "tool_running" ? state.phase : "streaming",
