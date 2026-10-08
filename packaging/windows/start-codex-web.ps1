@@ -5,6 +5,18 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Serialize cold starts: simultaneous shortcuts must not spawn competing app-servers.
+$bootstrapMutex = New-Object System.Threading.Mutex($false, 'Local\CodexWebStartup')
+$bootstrapLocked = $false
+try {
+  try {
+    $bootstrapLocked = $bootstrapMutex.WaitOne([TimeSpan]::FromSeconds(120))
+  } catch [System.Threading.AbandonedMutexException] {
+    $bootstrapLocked = $true
+  }
+  if (-not $bootstrapLocked) { throw 'Timed out waiting for Codex Web startup.' }
+
 $root = $PSScriptRoot
 $statePath = Join-Path $root 'install.json'
 if (!(Test-Path $statePath)) { throw "Codex Web install state not found: $statePath" }
@@ -67,14 +79,6 @@ $env:CODEX_CHATGPT_WEB_LAUNCHER = $webLauncher
 $env:CODEX_APP_SERVER_DEV_OPEN_APP_URL = 'codexweb://open'
 $env:CODEX_SPARKLE_ENABLED = 'false'
 
-# Make the Codex UI the first visible surface. Runtime bootstrap continues hidden
-# while the official Codex window owns its own loading state.
-$rootProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-  Where-Object { $_.ExecutablePath -eq $appExe -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -like "*$desktopProfile*" } |
-  Select-Object -First 1
-if (-not $SkipAppLaunch -and -not $rootProcess) {
-  Start-Process -FilePath $appExe -ArgumentList @("--user-data-dir=$desktopProfile",'--no-first-run') | Out-Null
-}
 if ([string]$runtimeConfig.browserHost -eq 'launcher') {
   if (!(Test-Path $launcherExe)) { throw "Codex Web launcher required by browserHost=launcher but not found: $launcherExe" }
   $launcherProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -eq $launcherExe } | Select-Object -First 1
@@ -108,7 +112,7 @@ if (-not $proxyReady) {
 if (-not $proxyReady) { throw "ChatGPT Web proxy did not become healthy on 127.0.0.1:$port" }
 
 $watcherRunning = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*watch-codex-web-proxy.ps1*' } |
+  Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -match '(?i)-File\s+.*watch-codex-web-proxy\.ps1(?:\s|"|$)' } |
   Select-Object -First 1
 if (-not $watcherRunning -and (Test-Path $proxyWatcher)) {
   Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',$proxyWatcher) -WindowStyle Hidden | Out-Null
@@ -189,6 +193,28 @@ if (-not (Get-NetTCPConnection -State Listen -LocalPort 45891 -ErrorAction Silen
     Start-Sleep -Milliseconds 250
   }
 }
-if (-not (Get-NetTCPConnection -State Listen -LocalPort 45891 -ErrorAction SilentlyContinue)) {
+$nativeListener = Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort 45891 -ErrorAction SilentlyContinue |
+  Select-Object -First 1
+if (-not $nativeListener) {
   throw 'Codex app-server did not start on 127.0.0.1:45891'
+}
+
+# A different process binding the port is not proof that our backend is ready.
+$listenerProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($nativeListener.OwningProcess)" -ErrorAction SilentlyContinue
+if (-not $listenerProcess -or $listenerProcess.ExecutablePath -ne $codexCli) {
+  throw "Port 45891 belongs to another process; Codex Web will not start against an unknown backend."
+}
+
+# The desktop must not connect until its own app-server is listening.
+if (-not $SkipAppLaunch) {
+  $rootProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.ExecutablePath -eq $appExe -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -like "*$desktopProfile*" } |
+    Select-Object -First 1
+  if (-not $rootProcess) {
+    Start-Process -FilePath $appExe -ArgumentList @("--user-data-dir=$desktopProfile",'--no-first-run') | Out-Null
+  }
+}
+} finally {
+  if ($bootstrapLocked) { $bootstrapMutex.ReleaseMutex() | Out-Null }
+  $bootstrapMutex.Dispose()
 }

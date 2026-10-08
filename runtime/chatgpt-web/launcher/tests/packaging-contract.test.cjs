@@ -32,11 +32,16 @@ test("Windows desktop entrypoint is a GUI launcher and never exposes PowerShell"
   assert.doesNotMatch(installer, /Write-Shortcut .*'Codex Web\.lnk'\) 'powershell\.exe'/);
   assert.match(installer, /\$commandValue = '"' \+ \$desktopLauncher \+ '" "%1"'/);
   assert.match(starter, /\[switch\]\$SkipAppLaunch/);
+  assert.match(starter, /CodexWebStartup/);
+  assert.match(starter, /bootstrapMutex\.WaitOne/);
+  assert.match(starter, /bootstrapMutex\.ReleaseMutex/);
   assert.ok(
     starter.indexOf("Start-Process -FilePath $appExe")
-      < starter.indexOf("$healthUrl ="),
-    "the Codex UI must open before runtime readiness waits so its own loading surface is first",
+      > starter.indexOf("$nativeListener = Get-NetTCPConnection"),
+    "the Codex UI must open only after the native backend is listening",
   );
+  assert.match(starter, /listenerProcess\.ExecutablePath -ne \$codexCli/);
+  assert.match(installer, /Copy-Item .*watch-codex-web-proxy\.ps1/);
   assert.match(nativeLauncher, /CreateNoWindow = true/);
   assert.match(nativeLauncher, /ProcessWindowStyle\.Hidden/);
   assert.match(nativeLauncher, /start-codex-web\.ps1/);

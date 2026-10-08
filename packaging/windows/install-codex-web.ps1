@@ -71,6 +71,7 @@ Copy-Item $NativeBinary (Join-Path $binRoot 'codex-native.exe') -Force
 $desktopLauncher = Join-Path $managedRoot 'CodexWeb.exe'
 Copy-Item $DesktopLauncherBinary $desktopLauncher -Force
 Copy-Item (Join-Path $PSScriptRoot 'start-codex-web.ps1') (Join-Path $managedRoot 'start-codex-web.ps1') -Force
+Copy-Item (Join-Path $PSScriptRoot 'watch-codex-web-proxy.ps1') (Join-Path $managedRoot 'watch-codex-web-proxy.ps1') -Force
 if ($IconPath -and (Test-Path $IconPath)) {
   Copy-Item $IconPath (Join-Path $assetsRoot 'icon.ico') -Force
 }

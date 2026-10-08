@@ -45,14 +45,14 @@ This corresponds to **GPT-5.6 Sol (Web) - Alto**.
 
 CodexWeb owns the complete local startup sequence:
 
-1. the GUI-only `CodexWeb.exe` opens the isolated Codex desktop profile immediately, so the first visible surface is the Codex app and its own loading state;
+1. the GUI-only `CodexWeb.exe` starts a hidden serialized bootstrap without opening a terminal;
 2. the hidden bootstrap starts/verifies the Codex Web launcher and browser runtime;
 3. verify the local Responses proxy on `127.0.0.1:17841`, starting it when needed and keeping it under a loopback health watchdog;
 4. start the OpenAI tunnel-client and wait for `/healthz`, `/readyz`, and a dispatcher registration where the MCP `main` channel is actually routable;
-5. start the patched Codex app-server on `127.0.0.1:45891`;
+5. start the patched Codex app-server on `127.0.0.1:45891`, validate that this exact binary owns the listener, and only then open/focus the isolated Codex desktop profile;
 6. keep the selected startup default pinned to GPT-5.6 Sol Web High.
 
-The readiness gate prevents a first MCP request from racing ahead of the tunnel dispatcher. The proxy watchdog removes the earlier failure mode where the app-server stayed alive while the Responses proxy disappeared, producing `Reconnecting... Connection failed: error sending request`.
+A startup mutex prevents simultaneous shortcuts from racing to bind port `45891`. The readiness gate also prevents the desktop from connecting before its app-server is listening or a first MCP request from racing ahead of the tunnel dispatcher. The proxy watchdog removes the earlier failure mode where the app-server stayed alive while the Responses proxy disappeared, producing `Reconnecting... Connection failed: error sending request`.
 
 Remote compaction also treats managed-browser bootstrap as its own pre-submission phase. If the dedicated Chrome/Brave profile is left with a stale process or singleton lock, CodexWeb cleans that ownership and retries one time before CDP exists. Because no ChatGPT prompt can have been submitted before CDP is available, this recovery does not duplicate a compaction request. A live 6.2.1 `/v1/responses/compact` handoff was used to validate the final path.
 

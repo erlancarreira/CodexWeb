@@ -40,11 +40,14 @@ static class Program
             if (!File.Exists(BootstrapScript))
                 throw new FileNotFoundException("Bootstrap do Codex Web não encontrado.", BootstrapScript);
 
-            var running = FindRunningApp();
-            if (running != null)
-                Focus(running);
-
-            return RunBootstrapHidden(args);
+            int exitCode = RunBootstrapHidden(args);
+            if (exitCode == 0)
+            {
+                var running = FindRunningApp();
+                if (running != null)
+                    Focus(running);
+            }
+            return exitCode;
         }
         catch (Exception ex)
         {

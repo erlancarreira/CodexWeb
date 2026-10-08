@@ -9,6 +9,8 @@
 - [ ] Add repeatable upstream synchronization helpers after the first unified release is validated.
 
 ## Runtime reliability
+- [x] Fix desktop ECONNREFUSED at 127.0.0.1:45891: delay GUI until app-server readiness, serialize bootstrap and validate listener ownership.
+- [x] Install the Responses proxy watchdog alongside the managed Windows bootstrap and smoke-test the updated local script.
 - [x] Add GPT-5.6 Sol Web Light/Medium/High picker aliases to the patched app-server.
 - [x] Preserve SQL migration LF checksums on Windows.
 - [x] Default startup to `chatgpt-web/high` with reasoning `high`.
